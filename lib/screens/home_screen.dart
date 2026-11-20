@@ -7,6 +7,7 @@ import 'bank_screen.dart';
 import 'friends_screen.dart';
 import 'expense_screens.dart';
 import 'group_screens.dart';
+import 'quick_meal_result_screen.dart';
 import 'quick_meal_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -63,7 +64,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = [...AppScope.of(context).data.groups]
+    final data = AppScope.of(context).data;
+    final groups = [...data.groups]
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     final active = groups.where((g) => !g.archived).toList();
     final visible = groups.where((g) => g.archived == archived).toList();
@@ -86,30 +88,65 @@ class _HomeScreenState extends State<HomeScreen> {
       body: switch (tab) {
         0 => PageBody(
           children: [
-            _Summary(groups: groups),
-            const SizedBox(height: 14),
             FilledButton.icon(
+              onPressed: () => openPage<void>(context, const QuickMealScreen()),
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
+              icon: const Icon(Icons.restaurant_outlined),
+              label: const Text('開始聚餐分帳'),
+            ),
+            if (data.quickMeals.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('不用建群組，也能先算這一餐。', textAlign: TextAlign.center),
+              ),
+            Center(
+              child: TextButton(
+                onPressed: () =>
+                    openPage<void>(context, const QuickMealExampleScreen()),
+                child: const Text('用範例試一次'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              children: [
+                Text(
+                  '最近聚餐',
+                  style: Theme.of(context).textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      openPage<void>(context, const QuickMealHistoryScreen()),
+                  child: const Text('全部聚餐紀錄'),
+                ),
+              ],
+            ),
+            if (data.quickMeals.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('還沒有聚餐紀錄'),
+              ),
+            for (final meal in data.quickMeals.take(3))
+              QuickMealHistoryTile(meal: meal),
+            const SectionTitle('群組帳本'),
+            _Summary(groups: groups),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
               onPressed: () => quickExpense(active),
               icon: const Icon(Icons.add),
               label: const Text('新增消費'),
             ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => openPage<void>(context, const QuickMealScreen()),
-              icon: const Icon(Icons.restaurant_outlined),
-              label: const Text('快速聚餐'),
-            ),
-            const SectionTitle('近期群組'),
             if (active.isEmpty)
-              EmptyCard(
-                Icons.groups_outlined,
-                '建立第一個群組',
-                '為一起分帳的人開一本帳，從第一筆消費開始。',
-                action: OutlinedButton(
-                  onPressed: create,
-                  child: const Text('建立群組'),
-                ),
-              ),
+              TextButton.icon(
+                onPressed: create,
+                icon: const Icon(Icons.group_add_outlined),
+                label: const Text('建立群組'),
+              )
+            else
+              const SectionTitle('近期群組'),
             for (final g in active.take(4)) _GroupCard(g),
             if (active.length > 4)
               TextButton(

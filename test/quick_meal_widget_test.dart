@@ -16,6 +16,7 @@ Future<void> _launch(
   MemorySplitRepository repo, {
   Size size = const Size(430, 900),
   double scale = 1,
+  bool openForm = true,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -25,7 +26,7 @@ Future<void> _launch(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(SplitTogetherApp(repository: repo));
   await tester.pumpAndSettle();
-  await _tap(tester, find.text('快速聚餐'));
+  if (openForm) await _tap(tester, find.text('開始聚餐分帳'));
 }
 
 Future<void> _show(WidgetTester tester, Finder target) async {
@@ -80,6 +81,114 @@ Future<void> _saveMeal(
 }
 
 void main() {
+  testWidgets('新使用者可在首頁直接用臨時參與者完成一餐並從最近聚餐返回', (tester) async {
+    final repo = MemorySplitRepository();
+    await _launch(tester, repo, openForm: false);
+    expect(
+      find.widgetWithText(FilledButton, '開始聚餐分帳').hitTestable(),
+      findsOneWidget,
+    );
+    expect(find.text('不用建群組，也能先算這一餐。'), findsOneWidget);
+    await _tap(tester, find.text('開始聚餐分帳'));
+    final amount = _key('meal-amount');
+    expect(
+      tester.getTopLeft(amount).dy,
+      lessThan(tester.getTopLeft(_attendee(quickMealSelfId)).dy),
+    );
+    expect(
+      tester.widget<FilterChip>(_attendee(quickMealSelfId)).selected,
+      isFalse,
+    );
+    expect(await _canSave(tester), isFalse);
+    await _show(tester, _key('meal-missing'));
+    expect(
+      tester.widget<Text>(_key('meal-missing')).data,
+      '還需要有效的帳單總額、至少兩位出席者、一位付款人。',
+    );
+    await _amount(tester, '1200');
+    await _tap(tester, _attendee(quickMealSelfId));
+    await _tap(tester, _key('meal-add-guest'));
+    final input = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(input, '小林、小安、小晴');
+    await _tap(tester, find.widgetWithText(FilledButton, '儲存'));
+    final guestPayer = find.widgetWithText(ChoiceChip, '小林');
+    expect(tester.widget<ChoiceChip>(guestPayer).selected, isFalse);
+    await _show(tester, _key('meal-missing'));
+    expect(tester.widget<Text>(_key('meal-missing')).data, '還需要一位付款人。');
+    await _tap(tester, guestPayer);
+    await _tap(tester, find.text('看分帳結果'));
+    expect(find.text(r'你要轉給小林 NT$300').hitTestable(), findsOneWidget);
+    final data = await repo.load();
+    expect(data.groups, isEmpty);
+    expect(data.friends, isEmpty);
+    final meal = data.quickMeals.single;
+    expect(meal.total, 120000);
+    expect(meal.people.values, unorderedEquals(['我', '小林', '小安', '小晴']));
+    expect(meal.transfers.length, 3);
+    await _tap(tester, find.byType(BackButton));
+    final recent = _key('meal-history-${meal.id}');
+    await _tap(tester, recent);
+    expect(find.text(r'你要轉給小林 NT$300'), findsOneWidget);
+    await _tap(tester, find.byType(BackButton));
+    await _tap(tester, find.text('開始聚餐分帳'));
+    expect(find.text('小林'), findsNothing);
+    expect(tester.widget<TextField>(amount).controller!.text, isEmpty);
+    expect(
+      tester.widget<FilterChip>(_attendee(quickMealSelfId)).selected,
+      isFalse,
+    );
+    expect(find.byType(ChoiceChip), findsNothing);
+  });
+
+  testWidgets('首頁顯示最近三餐，完整紀錄可回看更早的餐次，常用朋友依最近出席排序', (tester) async {
+    final repo = MemorySplitRepository();
+    final first = await repo.createFriend('阿安');
+    final recent = await repo.createFriend('小晴');
+    final never = await repo.createFriend('大文');
+    final names = (await repo.load()).quickMealPeople;
+    for (var day = 1; day <= 4; day++) {
+      final friend = day == 3 ? first : recent;
+      await repo.saveQuickMeal(
+        QuickMeal(
+          id: '餐$day',
+          createdAt: DateTime.utc(2026, 11, day),
+          total: day * 10000,
+          payerId: friend,
+          people: {quickMealSelfId: '我', friend: names[friend]!},
+        ),
+      );
+    }
+    await _launch(tester, repo, openForm: false);
+    expect(_key('meal-history-餐4'), findsOneWidget);
+    expect(_key('meal-history-餐3'), findsOneWidget);
+    expect(_key('meal-history-餐2'), findsOneWidget);
+    expect(_key('meal-history-餐1'), findsNothing);
+    await _tap(tester, find.text('全部聚餐紀錄'));
+    await _tap(tester, _key('meal-history-餐1'));
+    expect(find.text(r'你要轉給小晴 NT$50'), findsOneWidget);
+    await _tap(tester, find.byType(BackButton));
+    expect(find.text('聚餐紀錄'), findsOneWidget);
+    await _tap(tester, find.byType(BackButton));
+    await _tap(tester, find.text('開始聚餐分帳'));
+    final friends = tester
+        .widgetList<FilterChip>(find.byType(FilterChip))
+        .toList();
+    final ids = friends.map((chip) => chip.key).toList();
+    expect(
+      ids.indexOf(ValueKey('meal-attendee-$recent')),
+      lessThan(ids.indexOf(ValueKey('meal-attendee-$first'))),
+    );
+    expect(
+      ids.indexOf(ValueKey('meal-attendee-$first')),
+      lessThan(ids.indexOf(ValueKey('meal-attendee-$never'))),
+    );
+    expect(friends.any((chip) => chip.selected), isFalse);
+    expect(find.byType(ChoiceChip), findsNothing);
+  });
+
   testWidgets('快速聚餐只有本人應付時顯示轉帳入口，設定或取消後返回同一餐', (tester) async {
     final repo = MemorySplitRepository();
     final lin = await repo.createFriend('小林');
@@ -143,7 +252,7 @@ void main() {
     expect(_key('meal-bank-copy-account'), findsNothing);
 
     await _tap(tester, find.byType(BackButton));
-    await _tap(tester, find.text('快速聚餐'));
+    await _tap(tester, find.text('開始聚餐分帳'));
     await _saveMeal(tester, [lin, an], lin);
     expect(_key('meal-bank-open'), findsNothing);
     expect(_key('meal-bank-copy-account'), findsNothing);
@@ -184,7 +293,7 @@ void main() {
     expect(find.text('822 中國信託 · 末四碼 6789'), findsOneWidget);
     expect(find.textContaining(account), findsNothing);
     expect(bankCalls, isEmpty);
-    await _tap(tester, find.widgetWithText(FilledButton, '分享清單'));
+    await _tap(tester, _key('meal-share-list'));
     expect(sharing.single, contains('我 → 小林'));
     expect(sharing.single, isNot(contains('6789')));
     expect(sharing.single, isNot(contains(account)));
@@ -226,6 +335,7 @@ void main() {
     expect(await _canSave(tester), isTrue);
     await _tap(tester, _attendee(lin));
     expect(_payer(lin), findsNothing);
+    await _show(tester, find.text('原付款人已取消出席，請重新選擇付款人。'));
     await _tap(tester, _attendee(lin));
     expect(tester.widget<ChoiceChip>(_payer(lin)).selected, isFalse);
     expect(await _canSave(tester), isFalse);
@@ -270,6 +380,7 @@ void main() {
     }
     await _tap(tester, _payer(lin));
     await _amount(tester, '1200');
+    await _tap(tester, _key('meal-preview'));
     for (final id in [quickMealSelfId, lin, an, qing]) {
       final row = _key('meal-share-$id');
       await _show(tester, row);
@@ -308,7 +419,7 @@ void main() {
     expect(copied, isEmpty);
     await _tap(tester, find.text('複製清單'));
     expect(sent, isEmpty);
-    await _tap(tester, find.text('分享清單'));
+    await _tap(tester, find.text('分享分帳清單'));
     expect(sent.single, copied.single);
     expect(sent.single, first.shareText);
     for (final name in ['小林', '小安', '小晴', '我']) {
@@ -362,6 +473,7 @@ void main() {
     }
     await _tap(tester, _payer(lin2));
     await _amount(tester, '1000');
+    await _tap(tester, _key('meal-preview'));
     final orderedIds = [quickMealSelfId, lin1, lin2]..sort();
     for (final id in orderedIds) {
       final row = _key('meal-share-$id');

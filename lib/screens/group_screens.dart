@@ -405,10 +405,18 @@ Future<void> editName(
   required String title,
   required String initial,
   required Future<void> Function(String) save,
+  String? helperText,
+  int maxLines = 1,
 }) => showDialog<void>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => _NameDialog(title: title, initial: initial, save: save),
+  builder: (_) => _NameDialog(
+    title: title,
+    initial: initial,
+    save: save,
+    helperText: helperText,
+    maxLines: maxLines,
+  ),
 );
 
 class _NameDialog extends StatefulWidget {
@@ -416,9 +424,13 @@ class _NameDialog extends StatefulWidget {
     required this.title,
     required this.initial,
     required this.save,
+    required this.helperText,
+    required this.maxLines,
   });
   final String title, initial;
   final Future<void> Function(String) save;
+  final String? helperText;
+  final int maxLines;
   @override
   State<_NameDialog> createState() => _NameDialogState();
 }
@@ -453,8 +465,15 @@ class _NameDialogState extends State<_NameDialog> {
     content: TextFormField(
       autofocus: true,
       initialValue: widget.initial,
+      minLines: 1,
+      maxLines: widget.maxLines,
       onChanged: (v) => value = v,
-      decoration: InputDecoration(labelText: '名稱', errorText: error),
+      decoration: InputDecoration(
+        labelText: '名稱',
+        helperText: widget.helperText,
+        helperMaxLines: 3,
+        errorText: error,
+      ),
       onFieldSubmitted: (_) => submit(),
     ),
     actions: [

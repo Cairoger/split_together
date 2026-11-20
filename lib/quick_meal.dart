@@ -3,6 +3,10 @@ part of 'domain.dart';
 // 常用朋友以 32 位十六進位 ID 儲存，自己的身分不依賴顯示名稱。
 const quickMealSelfId = '@self';
 
+String quickMealGuestId(String mealId, int number) => '@guest:$mealId:$number';
+
+final _guestNumber = RegExp(r'^[1-9][0-9]*$');
+
 class QuickMeal {
   factory QuickMeal({
     required String id,
@@ -64,6 +68,14 @@ class QuickMeal {
   final int total;
   final Map<String, String> people;
   final Map<String, int> shares;
+
+  // 臨時參與者只屬於當餐；其他餐的編號不能當作這餐的臨時出席者。
+  bool needsSavedFriend(String personId) {
+    if (personId == quickMealSelfId) return false;
+    final prefix = '@guest:$id:';
+    return !personId.startsWith(prefix) ||
+        !_guestNumber.hasMatch(personId.substring(prefix.length));
+  }
 
   List<Transfer> get transfers => SettlementService.suggest({
     for (final share in shares.entries)

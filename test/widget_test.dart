@@ -67,7 +67,7 @@ void main() {
   ) async {
     final repo = MemorySplitRepository();
     await _launch(tester, repo);
-    expect(find.text('建立第一個群組'), findsOneWidget);
+    expect(find.text('開始聚餐分帳'), findsOneWidget);
     await _tapText(tester, '建立群組');
     await _tapText(tester, '儲存群組');
     expect(find.text('請輸入群組名稱'), findsOneWidget);

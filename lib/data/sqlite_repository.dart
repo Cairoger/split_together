@@ -112,7 +112,9 @@ class SqliteSplitRepository extends LedgerRepository {
         'payer_id': meal.payerId,
       });
       for (final person in meal.people.entries) {
-        if (person.key != quickMealSelfId) await _checkFriend(tx, person.key);
+        if (meal.needsSavedFriend(person.key)) {
+          await _checkFriend(tx, person.key);
+        }
         batch.insert('quick_meal_people', {
           'meal_id': meal.id,
           'person_id': person.key,

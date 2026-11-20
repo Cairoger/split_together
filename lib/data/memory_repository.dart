@@ -47,7 +47,7 @@ class MemorySplitRepository extends LedgerRepository {
       return;
     }
     if (meal.people.keys.any(
-      (id) => id != quickMealSelfId && !_friends.containsKey(id),
+      (id) => meal.needsSavedFriend(id) && !_friends.containsKey(id),
     )) {
       throw const FormatException('找不到常用朋友');
     }

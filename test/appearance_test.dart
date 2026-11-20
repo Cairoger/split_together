@@ -13,6 +13,15 @@ Future<void> openApp(WidgetTester tester, MemorySplitRepository repo) async {
 
 Future<void> tap(WidgetTester tester, String label) async {
   final target = find.text(label);
+  if (target.evaluate().isEmpty) {
+    final scrollable = find
+        .descendant(
+          of: find.byType(ListView).first,
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(target, 180, scrollable: scrollable);
+  }
   if (target.hitTestable().evaluate().isEmpty) {
     await tester.ensureVisible(target);
     await tester.pumpAndSettle();

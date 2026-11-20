@@ -61,6 +61,38 @@ void main() {
   });
 
   for (final sqlite in [false, true]) {
+    test('${sqlite ? 'SQLite' : '記憶體'} 臨時參與者只留在該餐，不寫入常用朋友', () async {
+      final SplitRepository repo = sqlite
+          ? SqliteSplitRepository(
+              factory: databaseFactoryFfi,
+              path: inMemoryDatabasePath,
+            )
+          : MemorySplitRepository();
+      addTearDown(repo.close);
+      final guestId = quickMealGuestId('dinner', 1);
+      final secondGuestId = quickMealGuestId('dinner', 2);
+      final snapshot = meal(
+        {quickMealSelfId: '我', guestId: '小林', secondGuestId: '小林（臨時 1）'},
+        guestId,
+        90000,
+        id: 'dinner',
+      );
+      await repo.saveQuickMeal(snapshot);
+      await repo.saveQuickMeal(snapshot);
+      final data = await repo.load();
+      expect(data.friends, isEmpty);
+      expect(data.groups, isEmpty);
+      expect(data.quickMealPeople.keys, [quickMealSelfId]);
+      expect(data.quickMeals.single.people, snapshot.people);
+      expect(data.quickMeals.single.payerId, guestId);
+      expect(data.quickMeals.single.transfers, hasLength(2));
+      await expectLater(
+        repo.saveQuickMeal(meal(snapshot.people, guestId, 90000, id: 'next')),
+        throwsFormatException,
+      );
+      expect((await repo.load()).quickMeals, hasLength(1));
+    });
+
     test('${sqlite ? 'SQLite' : '記憶體'} 以朋友 ID 區別同名、重送只存一次、每餐獨立', () async {
       final SplitRepository repo = sqlite
           ? SqliteSplitRepository(
