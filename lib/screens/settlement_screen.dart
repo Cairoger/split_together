@@ -7,6 +7,7 @@ import '../data/repository.dart';
 import '../domain.dart';
 import '../state.dart';
 import '../ui.dart';
+import 'bank_screen.dart';
 import 'expense_screens.dart' show LedgerDateField;
 
 class SettlementScreen extends StatefulWidget {
@@ -320,6 +321,8 @@ class _RepaymentFormState extends State<_RepaymentForm> {
                       _amount.text = Money.input(_limit(balances));
                     }),
             ),
+            if (from == group.self.id && to != null)
+              RecipientBankCard(key: ValueKey(to), member: group.member(to)),
             const SizedBox(height: 12),
             TextFormField(
               controller: _amount,

@@ -5,11 +5,23 @@ class MemorySplitRepository extends LedgerRepository {
   String _name = '我';
   AppAppearance _appearance = AppAppearance.light;
   final _groups = <String, Ledger>{};
+  final _friends = <String, NewFriend>{};
+  BankAppChoice? _bankApp;
 
   @override
   Future<AppData> load() async => AppData(
     defaultName: _name,
     appearance: _appearance,
+    bankApp: _bankApp,
+    friends: [
+      for (final f in _friends.values)
+        SavedFriend(
+          id: f.id,
+          name: f.name,
+          bankCode: f.account?.code,
+          lastFour: f.account?.number.substring(f.account!.number.length - 4),
+        ),
+    ],
     groups: _groups.values.toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)),
   );
@@ -25,14 +37,22 @@ class MemorySplitRepository extends LedgerRepository {
   }
 
   @override
-  Future<String> insertGroup(Ledger Function(String) build) async {
+  Future<String> insertGroup(
+    Ledger Function(String) build, {
+    List<NewFriend> newFriends = const [],
+  }) async {
     final group = build(_name);
+    _commitFriends(group, newFriends);
     _groups[group.id] = group;
     return group.id;
   }
 
   @override
-  Future<void> changeGroup(String id, Ledger Function(Ledger) update) async {
+  Future<void> changeGroup(
+    String id,
+    Ledger Function(Ledger) update, {
+    List<NewFriend> newFriends = const [],
+  }) async {
     final group = _groups[id];
     if (group == null) throw const FormatException('找不到群組');
     final next = update(group);
@@ -44,7 +64,46 @@ class MemorySplitRepository extends LedgerRepository {
         throw const FormatException('這筆紀錄屬於其他群組');
       }
     }
+    _commitFriends(next, newFriends);
     _groups[id] = next;
+  }
+
+  void _commitFriends(Ledger group, List<NewFriend> additions) {
+    final ids = {..._friends.keys, ...additions.map((f) => f.id)};
+    if (group.members.any(
+      (m) => m.friendId != null && !ids.contains(m.friendId),
+    )) {
+      throw const FormatException('找不到常用朋友');
+    }
+    for (final friend in additions) {
+      _friends[friend.id] = friend;
+    }
+  }
+
+  NewFriend _friend(String id) =>
+      _friends[id] ?? (throw const FormatException('找不到常用朋友'));
+
+  @override
+  Future<void> setBankApp(BankAppChoice? choice) async {
+    _bankApp = choice;
+  }
+
+  @override
+  Future<String?> readFriendAccount(String friendId) async =>
+      _friend(friendId).account?.number;
+
+  @override
+  Future<void> setFriendAccount(
+    String friendId,
+    String? bankCode,
+    String? accountNumber,
+  ) async {
+    final old = _friend(friendId);
+    _friends[friendId] = (
+      id: old.id,
+      name: old.name,
+      account: validateFriendAccount(bankCode, accountNumber),
+    );
   }
 
   @override

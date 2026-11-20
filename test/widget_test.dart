@@ -274,6 +274,7 @@ void main() {
     await _enter(tester, '名稱', '小禾');
     await _tapText(tester, '儲存');
     expect((await repo.load()).defaultName, '小禾');
+    await _reveal(tester, find.text('本機離線儲存'));
     expect(find.text('本機離線儲存'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

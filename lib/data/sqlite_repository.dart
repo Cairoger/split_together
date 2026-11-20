@@ -1,27 +1,31 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../domain.dart';
+import 'account_cipher.dart';
 import 'repository.dart';
 import 'schema.dart';
 
 typedef _Row = Map<String, Object?>;
 
 class SqliteSplitRepository extends LedgerRepository {
-  SqliteSplitRepository({this.factory, this.path});
+  SqliteSplitRepository({this.factory, this.path, AccountCipher? accountCipher})
+    : _cipher = accountCipher ?? AccountCipher();
 
   final DatabaseFactory? factory;
   final String? path;
+  final AccountCipher _cipher;
   Future<Database>? _opening;
-  Future<Database> get _database => _opening ??= _open().onError((
-    Object error,
-    StackTrace stack,
-  ) {
-    // This runs after assigning the pending Future, even if _open failed
-    // before its first await. A retry can always open a fresh connection.
-    _opening = null;
-    Error.throwWithStackTrace(error, stack);
-  });
+  Future<Database> get _database =>
+      _opening ??= _open().onError((Object error, StackTrace stack) {
+        // This runs after assigning the pending Future, even if _open failed
+        // before its first await. A retry can always open a fresh connection.
+        _opening = null;
+        Error.throwWithStackTrace(error, stack);
+      });
 
   Future<Database> _open() async {
     final driver = factory ?? databaseFactory;
@@ -30,7 +34,7 @@ class SqliteSplitRepository extends LedgerRepository {
     return driver.openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) => migrateLedger(db, 0, version),
         onUpgrade: migrateLedger,
@@ -47,7 +51,9 @@ class SqliteSplitRepository extends LedgerRepository {
 
   Future<Map<String, String>> _settings(DatabaseExecutor db) async {
     final rows = await db.query('app_settings');
-    return {for (final row in rows) row['key'] as String: row['value'] as String};
+    return {
+      for (final row in rows) row['key'] as String: row['value'] as String,
+    };
   }
 
   @override
@@ -55,12 +61,27 @@ class SqliteSplitRepository extends LedgerRepository {
     final db = await _database;
     return db.transaction((tx) async {
       final settings = await _settings(tx);
+      final friends = await tx.query(
+        'friends',
+        columns: ['id', 'name', 'bank_code', 'last_four'],
+        orderBy: 'name, id',
+      );
       return AppData(
         defaultName: settings['default_name'] ?? '我',
         appearance: settings['appearance'] == AppAppearance.dark.name
             ? AppAppearance.dark
             : AppAppearance.light,
         groups: await _loadGroups(tx),
+        bankApp: _decodeBankApp(settings['bank_app']),
+        friends: [
+          for (final row in friends)
+            SavedFriend(
+              id: row['id'] as String,
+              name: row['name'] as String,
+              bankCode: row['bank_code'] as String?,
+              lastFour: row['last_four'] as String?,
+            ),
+        ],
       );
     });
   }
@@ -80,15 +101,136 @@ class SqliteSplitRepository extends LedgerRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  BankAppChoice? _decodeBankApp(String? raw) {
+    if (raw == null) return null;
+    try {
+      return switch (jsonDecode(raw)) {
+        {'id': final String id, 'label': final String label} => BankAppChoice(
+          id: id,
+          label: label,
+        ),
+        _ => null,
+      };
+    } on FormatException {
+      return null;
+    }
+  }
+
   @override
-  Future<String> insertGroup(Ledger Function(String) build) async {
+  Future<void> setBankApp(BankAppChoice? choice) async {
+    if (choice == null) {
+      final db = await _database;
+      await db.delete(
+        'app_settings',
+        where: 'key = ?',
+        whereArgs: ['bank_app'],
+      );
+    } else {
+      await _writeSetting(
+        'bank_app',
+        jsonEncode({'id': choice.id, 'label': choice.label}),
+      );
+    }
+  }
+
+  Future<_Row> _accountRow(
+    DatabaseExecutor tx,
+    String id,
+    FriendAccount? account,
+  ) async {
+    if (account == null) {
+      return {'bank_code': null, 'last_four': null, 'account_cipher': null};
+    }
+    // The database transaction serializes first use of the device key.
+    final encryptedRows = await tx.rawQuery(
+      'SELECT 1 FROM friends WHERE account_cipher IS NOT NULL LIMIT 1',
+    );
+    final cipher = await _cipher.encrypt(
+      id,
+      account.code,
+      account.number,
+      canCreateKey: encryptedRows.isEmpty,
+    );
+    return {
+      'bank_code': account.code,
+      'last_four': account.number.substring(account.number.length - 4),
+      'account_cipher': cipher,
+    };
+  }
+
+  @override
+  Future<void> setFriendAccount(
+    String friendId,
+    String? bankCode,
+    String? accountNumber,
+  ) async {
+    final account = validateFriendAccount(bankCode, accountNumber);
+    final db = await _database;
+    await db.transaction((tx) async {
+      final values = await _accountRow(tx, friendId, account);
+      final count = await tx.update(
+        'friends',
+        values,
+        where: 'id = ?',
+        whereArgs: [friendId],
+      );
+      if (count != 1) throw const FormatException('找不到常用朋友');
+    });
+  }
+
+  @override
+  Future<String?> readFriendAccount(String friendId) async {
+    final db = await _database;
+    final rows = await db.query(
+      'friends',
+      columns: ['bank_code', 'account_cipher'],
+      where: 'id = ?',
+      whereArgs: [friendId],
+    );
+    if (rows.isEmpty) throw const FormatException('找不到常用朋友');
+    final data = rows.single['account_cipher'] as Uint8List?;
+    if (data == null) return null;
+    return _cipher.decrypt(friendId, rows.single['bank_code'] as String, data);
+  }
+
+  Future<void> _insertFriends(
+    DatabaseExecutor tx,
+    List<NewFriend> friends,
+  ) async {
+    for (final friend in friends) {
+      await tx.insert('friends', {
+        'id': friend.id,
+        'name': friend.name,
+        ...await _accountRow(tx, friend.id, friend.account),
+      });
+    }
+  }
+
+  Future<void> _checkFriend(DatabaseExecutor tx, String? id) async {
+    if (id == null) return;
+    final rows = await tx.query(
+      'friends',
+      columns: ['id'],
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (rows.isEmpty) throw const FormatException('找不到常用朋友');
+  }
+
+  @override
+  Future<String> insertGroup(
+    Ledger Function(String) build, {
+    List<NewFriend> newFriends = const [],
+  }) async {
     final db = await _database;
     return db.transaction((tx) async {
       final settings = await _settings(tx);
       final group = build(settings['default_name'] ?? '我');
+      await _insertFriends(tx, newFriends);
       final batch = tx.batch();
       batch.insert('groups', _groupRow(group));
       for (final member in group.members) {
+        await _checkFriend(tx, member.friendId);
         batch.insert('members', _memberRow(group.id, member));
       }
       await batch.commit(noResult: true);
@@ -97,17 +239,25 @@ class SqliteSplitRepository extends LedgerRepository {
   }
 
   @override
-  Future<void> changeGroup(String id, Ledger Function(Ledger) update) async {
+  Future<void> changeGroup(
+    String id,
+    Ledger Function(Ledger) update, {
+    List<NewFriend> newFriends = const [],
+  }) async {
     final db = await _database;
     await db.transaction((tx) async {
       final group = (await _loadGroups(tx, id)).firstOrNull;
       if (group == null) throw const FormatException('找不到群組');
       final next = update(group);
+      await _insertFriends(tx, newFriends);
       final batch = tx.batch();
       batch.update('groups', _groupRow(next), where: 'id = ?', whereArgs: [id]);
       final members = {for (final member in group.members) member.id: member};
       for (final member in next.members) {
         final old = members[member.id];
+        if (old?.friendId != member.friendId) {
+          await _checkFriend(tx, member.friendId);
+        }
         if (old == null) {
           batch.insert('members', _memberRow(id, member));
         } else if (!identical(old, member)) {
@@ -189,6 +339,7 @@ _Row _memberRow(String groupId, Member m) => {
   'name': m.name,
   'is_self': m.isSelf ? 1 : 0,
   'is_active': m.isActive ? 1 : 0,
+  'friend_id': m.friendId,
   'created_at': _utc(m.createdAt),
 };
 
@@ -238,6 +389,7 @@ Future<List<Ledger>> _loadGroups(DatabaseExecutor tx, [String? groupId]) async {
         name: row['name'] as String,
         isSelf: row['is_self'] == 1,
         isActive: row['is_active'] == 1,
+        friendId: row['friend_id'] as String?,
         createdAt: DateTime.parse(row['created_at'] as String),
       ),
     );

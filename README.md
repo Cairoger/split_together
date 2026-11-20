@@ -16,6 +16,14 @@ SplitTogether 是繁體中文的離線分帳 App。適合由一人替旅伴、�
 
 在「設定 → 外觀」可選擇「光亮模式」或「黑暗模式」。外觀會立即套用至整個 App，下次開啟時會沿用這台裝置儲存的選擇。第一次使用或從舊版更新時，預設為光亮模式。
 
+## 常用朋友與銀行 App
+
+- 在「成員管理 → 新增成員」可選擇現有朋友，或填寫姓名並勾選「存為常用朋友」。建立群組也可貼上多行姓名，在儲存前逐一移除。既有成員可從成員選單連結朋友；同名朋友需手動選取。
+- 每位朋友可儲存一組收款銀行代碼與帳號。在「設定 → 常用朋友」查看、修改、複製或刪除帳號。清單只顯示末四碼，前導零會保留。群組的文字還款清單只含姓名及還款金額。
+- 在「設定 → 我的轉帳 App」選擇中國信託行動銀行、台新行動銀行、行動郵局，或在 Android 點「選擇其他已安裝的 App」。這項設定代表自己的付款工具，可與收款人的銀行不同。
+- iPhone 可在 Apple「捷徑」建立只有「打開 App」動作的捷徑，再於「我的轉帳 App → 使用我的捷徑」輸入相同名稱。行動郵局提供 App Store 入口，也可透過上述捷徑開啟。中國信託與台新的 iOS 入口依銀行公布的啟動連結設定。[Apple 捷徑說明](https://support.apple.com/zh-tw/guide/shortcuts/apd624386f42/ios) · [中國信託](https://www.ctbcbank.com/content/dam/minisite/long/mobile/PRO_URL.html) · [台新銀行](https://www.taishinbank.com.tw/TSB/personal/digital/Digital-Platform/mobile-banking/online-download/) · [中華郵政](https://www.post.gov.tw/post/internet/B_saving/index.jsp?ID=1651202500081&ID=1651210046972)
+- 在「智慧結算」點選自己應付的建議，分別點「複製收款帳號」和開啟所選 App 的按鈕。在銀行端自行確認收款人、輸入金額並完成轉帳，再回到 SplitTogether 登記實付金額。單純複製或離開 App 不會改動餘額。
+
 ## 在 Windows 執行 Android 版
 
 此專案沿用既有 Flutter App 與 Android、iOS 平台設定。開發環境使用 Flutter 3.50.0 stable、Dart 3.14.0。請在專案根目錄執行以下指令。
@@ -54,6 +62,10 @@ flutter build apk --debug
 
 金額使用整數分，百分比使用基點。百分比與權重分攤採最大餘數法，尾差以成員 ID 穩定排序。結算每次配對剩餘欠款與應收金額最大者，可能有其他轉帳次數更少的解。還款只改變餘額，群組總消費僅計入消費紀錄。
 
-正式入口使用 `sqflite` 儲存資料，`path` 組合平台資料路徑，測試使用 `sqflite_common_ffi` 開啟實際 SQLite 檔案。資料庫版本為 1，啟用外鍵，消費與分攤以同一筆交易寫入。日期以 UTC 儲存，畫面顯示裝置當地日期。
+正式入口使用 `sqflite`，測試使用 `sqflite_common_ffi` 開啟實際 SQLite 檔案。資料庫版本為 2，升級時保留原有帳本，新增朋友資料與選用的成員連結。消費與分攤以同一筆交易寫入。日期以 UTC 儲存，畫面顯示裝置當地日期。
+
+SQLite 保存銀行代碼、末四碼與帳號密文。`cryptography` 使用 AES-GCM 加密完整帳號，金鑰交由 `flutter_secure_storage` 使用裝置的安全儲存保管。開啟付款 App 時只使用 App 識別碼或捷徑名稱。只有明確點選複製時，完整帳號才寫入系統剪貼簿。
+
+若 Windows 僅建置手機版，而 `flutter pub get` 提示桌面外掛需要符號連結，可在目前 PowerShell 視窗將 `$env:FLUTTER_WINDOWS='false'` 與 `$env:FLUTTER_LINUX='false'` 設定後再執行。
 
 版本驗證結果與平台限制請見 [開發進度](docs/PROGRESS.md)。

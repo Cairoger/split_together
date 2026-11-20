@@ -298,7 +298,7 @@ void main() {
     test('舊帳本沒有外觀設定或設定值不明時採用光亮模式', () async {
       final id = await repo.createGroup('舊帳本', '生活', []);
       final db = await databaseFactoryFfi.openDatabase(path);
-      expect(await db.getVersion(), 1);
+      expect(await db.getVersion(), 2);
       expect((await repo.load()).appearance, AppAppearance.light);
       await db.insert('app_settings', {'key': 'appearance', 'value': 'other'});
       await repo.close();
@@ -322,7 +322,7 @@ void main() {
         (await db.rawQuery('PRAGMA foreign_keys')).single.values.single,
         1,
       );
-      expect(await db.getVersion(), 1);
+      expect(await db.getVersion(), 2);
       await expectLater(
         db.update(
           'expenses',

@@ -10,6 +10,7 @@ class Member {
     required this.isSelf,
     required this.isActive,
     required this.createdAt,
+    this.friendId,
   });
 
   final String id;
@@ -17,6 +18,46 @@ class Member {
   final bool isSelf;
   final bool isActive;
   final DateTime createdAt;
+  final String? friendId;
+}
+
+/// Bank accounts are strings so leading zeroes survive input, copy and storage.
+String normalizeAccountNumber(String raw) {
+  final digits = raw.replaceAll(RegExp(r'[\s-]'), '');
+  if (!RegExp(r'^[0-9]{6,20}$').hasMatch(digits)) {
+    throw const FormatException('收款帳號須為 6 至 20 位數字');
+  }
+  return digits;
+}
+
+class MemberDraft {
+  const MemberDraft({
+    required this.name,
+    this.friendId,
+    this.saveAsFriend = false,
+    this.bankCode,
+    this.accountNumber,
+  });
+  final String name;
+  final String? friendId, bankCode, accountNumber;
+  final bool saveAsFriend;
+}
+
+/// Only masked account information is included in the general app snapshot.
+class SavedFriend {
+  const SavedFriend({
+    required this.id,
+    required this.name,
+    this.bankCode,
+    this.lastFour,
+  });
+  final String id, name;
+  final String? bankCode, lastFour;
+}
+
+class BankAppChoice {
+  const BankAppChoice({required this.id, required this.label});
+  final String id, label;
 }
 
 class Expense {
@@ -116,9 +157,13 @@ class AppData {
     required this.defaultName,
     required this.groups,
     this.appearance = AppAppearance.light,
+    this.friends = const [],
+    this.bankApp,
   });
   final String defaultName;
   final AppAppearance appearance;
+  final List<SavedFriend> friends;
+  final BankAppChoice? bankApp;
   final List<Ledger> groups;
 }
 

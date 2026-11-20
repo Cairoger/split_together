@@ -13,8 +13,10 @@ Future<void> openApp(WidgetTester tester, MemorySplitRepository repo) async {
 
 Future<void> tap(WidgetTester tester, String label) async {
   final target = find.text(label);
-  await tester.ensureVisible(target);
-  await tester.pumpAndSettle();
+  if (target.hitTestable().evaluate().isEmpty) {
+    await tester.ensureVisible(target);
+    await tester.pumpAndSettle();
+  }
   await tester.tap(target);
   await tester.pumpAndSettle();
 }
@@ -77,7 +79,10 @@ void main() {
     await openApp(tester, repo);
     await tap(tester, '設定');
     final dark = find.text('黑暗模式');
-    await tester.ensureVisible(dark);
+    if (dark.hitTestable().evaluate().isEmpty) {
+      await tester.ensureVisible(dark);
+      await tester.pumpAndSettle();
+    }
     await tester.tap(dark);
     await tester.pump();
     await tester.tap(dark);

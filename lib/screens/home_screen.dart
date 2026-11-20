@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import '../domain.dart';
 import '../state.dart';
 import '../ui.dart';
+import 'bank_screen.dart';
+import 'friends_screen.dart';
 import 'expense_screens.dart';
 import 'group_screens.dart';
 
@@ -415,6 +417,27 @@ class _SettingsState extends State<_Settings> {
                   : (_) => selectAppearance(mode),
             );
           }).toList(),
+        ),
+        const SectionTitle('朋友與轉帳'),
+        Card(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.contacts_outlined),
+                title: const Text('常用朋友'),
+                subtitle: Text('${c.data.friends.length} 位朋友'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => openPage<void>(context, const FriendsScreen()),
+              ),
+              ListTile(
+                leading: const Icon(Icons.account_balance_outlined),
+                title: const Text('我的轉帳 App'),
+                subtitle: Text(c.data.bankApp?.label ?? '尚未選擇'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => openPage<void>(context, const BankAppScreen()),
+              ),
+            ],
+          ),
         ),
         const SectionTitle('關於帳本'),
         const Card(

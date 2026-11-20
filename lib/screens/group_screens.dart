@@ -4,6 +4,7 @@ import '../domain.dart';
 import '../state.dart';
 import '../ui.dart';
 import 'expense_screens.dart';
+import 'friends_screen.dart';
 import 'settlement_screen.dart';
 
 class GroupFormScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class GroupFormScreen extends StatefulWidget {
 class _GroupFormScreenState extends State<GroupFormScreen> {
   final name = TextEditingController();
   final others = TextEditingController();
+  final members = <MemberDraft>[];
   String category = groupCategories.first;
   String? error;
   bool initialized = false, busy = false;
@@ -40,6 +42,45 @@ class _GroupFormScreenState extends State<GroupFormScreen> {
     super.dispose();
   }
 
+  Set<String> get usedNames => {
+    AppScope.of(context).data.defaultName,
+    for (final member in members) member.name,
+  };
+
+  List<String> get typedNames => others.text
+      .split(RegExp(r'[\r\n]+'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+
+  String? typedError(List<String> names) {
+    final taken = usedNames;
+    for (final value in names) {
+      if (!taken.add(value)) return '群組裡已經有「$value」';
+    }
+    return null;
+  }
+
+  void collectNames() {
+    final names = typedNames;
+    if (typedError(names) != null) return;
+    setState(() {
+      members.addAll(names.map((n) => MemberDraft(name: n)));
+      others.clear();
+    });
+  }
+
+  Future<void> pickMember() async {
+    if (typedError(typedNames) != null) return;
+    collectNames();
+    await showMemberSheet(
+      context,
+      usedNames: usedNames,
+      usedFriendIds: members.map((m) => m.friendId).whereType<String>().toSet(),
+      save: (draft) async => setState(() => members.add(draft)),
+    );
+  }
+
   Future<void> save() async {
     if (busy) return;
     final c = AppScope.of(context);
@@ -54,12 +95,15 @@ class _GroupFormScreenState extends State<GroupFormScreen> {
     try {
       var id = widget.groupId;
       if (id == null) {
-        final names = others.text
-            .split('\n')
-            .map((s) => s.trim())
-            .where((s) => s.isNotEmpty)
-            .toList();
-        id = await c.change((r) => r.createGroup(name.text, category, names));
+        final names = typedNames;
+        final issue = typedError(names);
+        if (issue != null) throw FormatException(issue);
+        id = await c.change(
+          (r) => r.createGroupWithMembers(name.text, category, [
+            ...members,
+            for (final item in names) MemberDraft(name: item),
+          ]),
+        );
       } else {
         final existingId = id;
         await c.change((r) => r.editGroup(existingId, name.text, category));
@@ -111,14 +155,64 @@ class _GroupFormScreenState extends State<GroupFormScreen> {
               subtitle: const Text('我 · 自動加入'),
             ),
             const SizedBox(height: 8),
+            if (members.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final m in members)
+                    InputChip(
+                      label: Text(m.name),
+                      avatar: m.friendId == null && !m.saveAsFriend
+                          ? null
+                          : const Icon(Icons.contacts_outlined, size: 16),
+                      deleteButtonTooltipMessage: '移除${m.name}',
+                      onDeleted: busy
+                          ? null
+                          : () => setState(() => members.remove(m)),
+                    ),
+                ],
+              ),
+            if (members.isNotEmpty) const SizedBox(height: 8),
             TextField(
               controller: others,
-              minLines: 2,
-              maxLines: 6,
-              decoration: const InputDecoration(
+              enabled: !busy,
+              minLines: 1,
+              maxLines: 4,
+              onChanged: (value) {
+                if (value.contains('\n') && typedError(typedNames) == null) {
+                  collectNames();
+                } else {
+                  setState(() {});
+                }
+              },
+              decoration: InputDecoration(
                 labelText: '其他成員（選填）',
-                helperText: '每行一位，也可以稍後新增。',
+                helperText: '可一次貼上多行姓名，每行一位。',
+                errorText: typedError(typedNames),
               ),
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.add),
+                  onPressed:
+                      busy ||
+                          typedNames.isEmpty ||
+                          typedError(typedNames) != null
+                      ? null
+                      : collectNames,
+                  label: const Text('加入名單'),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.contacts_outlined),
+                  onPressed: busy || typedError(typedNames) != null
+                      ? null
+                      : pickMember,
+                  label: const Text('新增或選取朋友'),
+                ),
+              ],
             ),
           ],
           if (error != null)
@@ -131,7 +225,9 @@ class _GroupFormScreenState extends State<GroupFormScreen> {
             ),
           const SizedBox(height: 20),
           FilledButton(
-            onPressed: busy ? null : save,
+            onPressed: busy || (creating && typedError(typedNames) != null)
+                ? null
+                : save,
             child: Text(creating ? '儲存群組' : '儲存變更'),
           ),
         ],
@@ -379,6 +475,7 @@ class MembersScreen extends StatelessWidget {
     final c = AppScope.of(context);
     final g = c.group(groupId);
     final balances = BalanceService.balances(g);
+    final friends = {for (final friend in c.data.friends) friend.id: friend};
     return Scaffold(
       appBar: AppBar(title: const Text('成員管理')),
       body: PageBody(
@@ -387,11 +484,15 @@ class MembersScreen extends StatelessWidget {
             FilledButton.icon(
               icon: const Icon(Icons.person_add_outlined),
               label: const Text('新增成員'),
-              onPressed: () => editName(
+              onPressed: () => showMemberSheet(
                 context,
-                title: '新增成員',
-                initial: '',
-                save: (name) => c.change((r) => r.addMember(groupId, name)),
+                usedNames: g.members.map((m) => m.name).toSet(),
+                usedFriendIds: g.members
+                    .map((m) => m.friendId)
+                    .whereType<String>()
+                    .toSet(),
+                save: (draft) =>
+                    c.change((r) => r.addGroupMember(groupId, draft)),
               ),
             ),
           const SizedBox(height: 12),
@@ -405,14 +506,21 @@ class MembersScreen extends StatelessWidget {
                   m.isActive ? Icons.person_outline : Icons.person_off_outlined,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                subtitle: Text(
-                  balanceLabel(balances[m.id]!),
-                  style: TextStyle(
-                    color: balanceColor(
-                      Theme.of(context).colorScheme,
-                      balances[m.id]!,
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      balanceLabel(balances[m.id]!),
+                      style: TextStyle(
+                        color: balanceColor(
+                          Theme.of(context).colorScheme,
+                          balances[m.id]!,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (friends[m.friendId] case final friend?)
+                      Text(friendAccountSummary(friend)),
+                  ],
                 ),
                 trailing: g.archived
                     ? null
@@ -423,6 +531,13 @@ class MembersScreen extends StatelessWidget {
                             value: 'rename',
                             child: Text('重新命名'),
                           ),
+                          if (!m.isSelf)
+                            PopupMenuItem(
+                              value: 'friend',
+                              child: Text(
+                                m.friendId == null ? '連結常用朋友' : '朋友收款資料',
+                              ),
+                            ),
                           if (!m.isSelf && m.isActive)
                             PopupMenuItem(
                               value: 'deactivate',
@@ -442,6 +557,31 @@ class MembersScreen extends StatelessWidget {
                                 (r) => r.renameMember(groupId, m.id, name),
                               ),
                             );
+                          } else if (v == 'friend') {
+                            final id = m.friendId;
+                            if (id != null) {
+                              await openPage(
+                                context,
+                                FriendDetailScreen(friendId: id),
+                              );
+                            } else {
+                              await showMemberSheet(
+                                context,
+                                linkName: m.name,
+                                usedNames: g.members
+                                    .where((other) => other.id != m.id)
+                                    .map((m) => m.name)
+                                    .toSet(),
+                                usedFriendIds: g.members
+                                    .map((m) => m.friendId)
+                                    .whereType<String>()
+                                    .toSet(),
+                                save: (draft) => c.change(
+                                  (r) =>
+                                      r.linkMemberFriend(groupId, m.id, draft),
+                                ),
+                              );
+                            }
                           } else if (await confirmAction(
                             context,
                             '停用成員',

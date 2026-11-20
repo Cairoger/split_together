@@ -5,15 +5,33 @@ import '../domain.dart';
 // sqflite runs version callbacks inside its opening transaction. Extend the
 // migration sequence here when adding a version, keeping existing records.
 Future<void> migrateLedger(Database db, int oldVersion, int newVersion) async {
-  if (oldVersion != 0 || newVersion != 1) {
+  if (oldVersion < 0 || newVersion > 2 || oldVersion >= newVersion) {
     throw StateError('尚未支援此資料庫版本，請檢查應用程式版本');
   }
   final batch = db.batch();
-  for (final statement in _schemaV1) {
+  for (final statement in [
+    if (oldVersion < 1) ..._schemaV1,
+    if (oldVersion < 2 && newVersion >= 2) ..._schemaV2,
+  ]) {
     batch.execute(statement);
   }
   await batch.commit(noResult: true);
 }
+
+const _schemaV2 = [
+  '''CREATE TABLE friends (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    bank_code TEXT,
+    last_four TEXT,
+    account_cipher BLOB,
+    CHECK ((account_cipher IS NULL AND bank_code IS NULL AND last_four IS NULL)
+      OR (account_cipher IS NOT NULL AND bank_code IS NOT NULL AND last_four IS NOT NULL
+        AND bank_code GLOB '[0-9][0-9][0-9]' AND last_four GLOB '[0-9][0-9][0-9][0-9]'))
+  )''',
+  'ALTER TABLE members ADD COLUMN friend_id TEXT REFERENCES friends(id)',
+  'CREATE UNIQUE INDEX member_friend_per_group ON members(group_id, friend_id) WHERE friend_id IS NOT NULL',
+];
 
 const _schemaV1 = [
   '''CREATE TABLE app_settings (
