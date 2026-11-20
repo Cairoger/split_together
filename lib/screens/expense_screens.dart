@@ -4,12 +4,13 @@ import '../data/repository.dart';
 import '../domain.dart';
 import '../state.dart';
 import '../ui.dart';
+import 'expense_split_controls.dart';
 
 const _methods = {
-  SplitMethod.equal: '平均',
+  SplitMethod.equal: '平分',
   SplitMethod.exact: '指定金額',
   SplitMethod.percent: '百分比',
-  SplitMethod.weight: '權重',
+  SplitMethod.weight: '按份數分',
 };
 
 class LedgerDateField extends StatelessWidget {
@@ -76,7 +77,9 @@ class ExpenseFormScreen extends StatefulWidget {
 
 class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
   static const _categories = ['餐飲', '交通', '住宿', '購物', '娛樂', '其他'];
-  final _drafts = <SplitMethod, Map<String, String>>{};
+  final _exactAmounts = <String, String>{};
+  final _percentages = <String, int>{};
+  final _portions = <String, int>{};
   final _selected = <String>{};
   late final String _id;
   late final DateTime _createdAt;
@@ -86,6 +89,7 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
   late SplitMethod _method;
   bool _initialized = false;
   bool _busy = false;
+  bool _moreExpanded = false;
   String? _error;
 
   @override
@@ -111,57 +115,66 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
       old?.shares.keys ??
           group.members.where((m) => m.isActive).map((m) => m.id),
     );
-    if (old != null && _method != SplitMethod.equal) {
-      _drafts[_method] = {
-        for (final id in _selected)
-          id: switch (_method) {
-            SplitMethod.exact => Money.input(old.shares[id]!),
-            SplitMethod.percent => Money.input(old.inputs[id]!),
-            SplitMethod.weight => old.inputs[id]!.toString(),
-            SplitMethod.equal => '',
-          },
-      };
+    if (old != null) {
+      switch (old.method) {
+        case SplitMethod.exact:
+          _exactAmounts.addAll(
+            old.shares.map((id, n) => MapEntry(id, Money.input(n))),
+          );
+        case SplitMethod.percent:
+          _percentages.addAll(old.inputs);
+        case SplitMethod.weight:
+          _portions.addAll(old.inputs);
+        case SplitMethod.equal:
+          break;
+      }
     }
   }
 
-  String _draft(String id) =>
-      _drafts[_method]?[id] ?? (_method == SplitMethod.weight ? '1' : '');
+  // 百分比以基點儲存。分配剩餘基點時，沿用平分對成員 ID 的尾差順序。
+  void _distributePercent(int points, List<String> ids) {
+    if (ids.isEmpty) return;
+    _percentages.addAll(
+      points == 0
+          ? {for (final id in ids) id: 0}
+          : SplitService.divide(points, SplitMethod.equal, ids, const {}),
+    );
+  }
 
-  Map<String, int> _inputs() {
-    if (_method == SplitMethod.equal) return {};
-    final inputs = <String, int>{};
-    for (final id in _selected) {
-      final raw = _draft(id).trim();
+  void _startPercentDraft() {
+    if (_method == SplitMethod.percent && _percentages.isEmpty) {
+      _distributePercent(10000, _selected.toList());
+    }
+  }
+
+  void _changeValue(String id, int value) {
+    setState(() {
       if (_method == SplitMethod.weight) {
-        final value = int.tryParse(raw);
-        if (!RegExp(r'^[0-9]+$').hasMatch(raw) ||
-            value == null ||
-            value < 1 ||
-            value > 10000) {
-          throw const FormatException('請為每位參與者填寫 1 至 10000 的整數權重。');
+        _portions[id] = value;
+      } else if (_method == SplitMethod.percent) {
+        _percentages[id] = value;
+        if (_selected.length == 2) {
+          final other = _selected.firstWhere((memberId) => memberId != id);
+          _percentages[other] = 10000 - value;
         }
-        inputs[id] = value;
-      } else {
-        if (_method == SplitMethod.percent &&
-            !RegExp(r'^[0-9]+(?:\.[0-9]{1,2})?$').hasMatch(raw)) {
-          throw const FormatException('請填寫各人的百分比，最多至小數第二位。');
-        }
-        if (raw.isEmpty) throw const FormatException('請填寫每位參與者的分攤數值。');
-        inputs[id] = Money.parse(raw, allowZero: true);
       }
-    }
-    if (_selected.isNotEmpty && _method == SplitMethod.percent) {
-      final difference =
-          10000 - inputs.values.fold<int>(0, (sum, value) => sum + value);
-      if (difference != 0) {
-        final units = '${Money.input(difference.abs())}%';
-        throw FormatException('${difference > 0 ? '尚差' : '超出'} $units，請調整分攤。');
-      }
-    }
-    return inputs;
+    });
   }
 
-  Future<void> _save() async {
+  void _splitRemainder(String keepId) {
+    setState(
+      () => _distributePercent(
+        10000 - (_percentages[keepId] ?? 0),
+        _selected.where((id) => id != keepId).toList(),
+      ),
+    );
+  }
+
+  Future<void> _save(
+    int amount,
+    Map<String, int> inputs,
+    Map<String, int> shares,
+  ) async {
     if (_busy) return;
     final controller = AppScope.of(context);
     setState(() {
@@ -169,8 +182,6 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
       _error = null;
     });
     try {
-      final amount = Money.parse(_amount);
-      final inputs = _inputs();
       final expense = Expense(
         id: _id,
         title: _title.trim(),
@@ -182,12 +193,7 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
         note: _note.trim(),
         createdAt: _createdAt,
         updatedAt: DateTime.now().toUtc(),
-        shares: SplitService.divide(
-          amount,
-          _method,
-          _selected.toList(),
-          inputs,
-        ),
+        shares: shares,
         inputs: inputs,
       );
       await controller.change(
@@ -222,26 +228,52 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
       (m) => m.isActive || _original?.payerId == m.id,
     );
     final categories = {..._categories, _category};
+    final participants = members
+        .where((m) => _selected.contains(m.id))
+        .toList();
+    final values = switch (_method) {
+      SplitMethod.weight => {
+        for (final id in _selected) id: _portions[id] ?? 1,
+      },
+      SplitMethod.percent => {
+        for (final id in _selected) id: _percentages[id] ?? 0,
+      },
+      _ => const <String, int>{},
+    };
+    Map<String, int> inputs = values;
+    int? amount;
     Map<String, int>? shares;
     String? previewError;
     try {
-      final amount = Money.parse(_amount);
-      shares = SplitService.divide(
-        amount,
-        _method,
-        _selected.toList(),
-        _inputs(),
-      );
-    } catch (e) {
+      amount = Money.parse(_amount);
+      if (_method == SplitMethod.exact) {
+        if (participants.any(
+          (m) => (_exactAmounts[m.id] ?? '').trim().isEmpty,
+        )) {
+          throw const FormatException('請填寫每位參與者的分攤金額。');
+        }
+        inputs = {
+          for (final member in participants)
+            member.id: Money.parse(
+              _exactAmounts[member.id] ?? '',
+              allowZero: true,
+            ),
+        };
+      }
+      // 合計不足或超出的百分比由圖表說明，待調整後才顯示金額。
+      if (_method != SplitMethod.percent ||
+          _selected.isEmpty ||
+          values.values.fold(0, (a, b) => a + b) == 10000) {
+        shares = SplitService.divide(
+          amount,
+          _method,
+          _selected.toList(),
+          inputs,
+        );
+      }
+    } on FormatException catch (e) {
       previewError = _amount.trim().isEmpty ? '請輸入消費金額。' : errorMessage(e);
     }
-
-    final inputLabel = switch (_method) {
-      SplitMethod.exact => '分攤金額',
-      SplitMethod.percent => '百分比',
-      SplitMethod.weight => '權重',
-      SplitMethod.equal => '',
-    };
     return Scaffold(
       appBar: AppBar(title: Text(heading)),
       body: AbsorbPointer(
@@ -251,13 +283,7 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
             if (editing && group.repayments.isNotEmpty)
               const Text('群組已有還款紀錄。修改消費會重新計算餘額與還款建議。'),
             TextFormField(
-              initialValue: _title,
-              decoration: const InputDecoration(labelText: '項目名稱'),
-              textInputAction: TextInputAction.next,
-              onChanged: (v) => setState(() => _title = v),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
+              key: const ValueKey('expense-amount'),
               initialValue: _amount,
               decoration: const InputDecoration(
                 labelText: '消費金額',
@@ -266,27 +292,19 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
+              textInputAction: TextInputAction.next,
               onChanged: (v) => setState(() => _amount = v),
             ),
             const SizedBox(height: 12),
-            LedgerDateField(
-              label: '消費日期',
-              date: _date,
-              onChanged: (v) => setState(() => _date = v),
+            TextFormField(
+              key: const ValueKey('expense-title'),
+              initialValue: _title,
+              decoration: const InputDecoration(labelText: '項目名稱'),
+              onChanged: (v) => setState(() => _title = v),
             ),
-            const SizedBox(height: 12),
+            const SectionTitle('誰先付'),
             DropdownButtonFormField<String>(
-              initialValue: _category,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: '分類'),
-              items: [
-                for (final category in categories)
-                  DropdownMenuItem(value: category, child: Text(category)),
-              ],
-              onChanged: (v) => setState(() => _category = v!),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
+              key: const ValueKey('expense-payer'),
               initialValue: _payer,
               isExpanded: true,
               decoration: const InputDecoration(labelText: '付款人'),
@@ -299,13 +317,29 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
               ],
               onChanged: (v) => setState(() => _payer = v!),
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              initialValue: _note,
-              maxLines: 2,
-              minLines: 1,
-              decoration: const InputDecoration(labelText: '備註（選填）'),
-              onChanged: (v) => _note = v,
+            const SectionTitle('誰要分攤'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final m in members)
+                  FilterChip(
+                    key: ValueKey('expense-member-${m.id}'),
+                    label: Text(m.name),
+                    selected: _selected.contains(m.id),
+                    onSelected: (selected) {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      setState(() {
+                        if (selected) {
+                          _selected.add(m.id);
+                        } else {
+                          _selected.remove(m.id);
+                        }
+                        _startPercentDraft();
+                      });
+                    },
+                  ),
+              ],
             ),
             const SectionTitle('分帳方式'),
             Wrap(
@@ -314,66 +348,69 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
               children: [
                 for (final entry in _methods.entries)
                   ChoiceChip(
+                    key: ValueKey('expense-method-${entry.key.name}'),
                     label: Text(entry.value),
                     selected: _method == entry.key,
-                    onSelected: (_) => setState(() => _method = entry.key),
+                    onSelected: (_) {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      setState(() {
+                        _method = entry.key;
+                        _startPercentDraft();
+                      });
+                    },
                   ),
               ],
             ),
-            const SectionTitle('參與者'),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                for (final m in members)
-                  FilterChip(
-                    label: Text(m.name),
-                    selected: _selected.contains(m.id),
-                    onSelected: (selected) => setState(() {
-                      if (selected) {
-                        _selected.add(m.id);
-                      } else {
-                        _selected.remove(m.id);
-                      }
-                    }),
-                  ),
-              ],
+            const SizedBox(height: 12),
+            ExpenseSplitControls(
+              key: ValueKey(_method),
+              method: _method,
+              members: participants,
+              amount: amount,
+              shares: shares,
+              values: values,
+              exactDrafts: _exactAmounts,
+              onValueChanged: _changeValue,
+              onExactChanged: (id, value) =>
+                  setState(() => _exactAmounts[id] = value),
+              onSplitRemainder: _splitRemainder,
             ),
-            if (_method != SplitMethod.equal)
-              for (final m in members.where((m) => _selected.contains(m.id)))
-                Padding(
-                  key: ValueKey((_method, m.id)),
-                  padding: const EdgeInsets.only(top: 10),
-                  child: TextFormField(
-                    initialValue: _draft(m.id),
-                    decoration: InputDecoration(
-                      labelText: '${m.name}的$inputLabel',
-                      prefixText: _method == SplitMethod.exact ? 'NT\$ ' : null,
-                      suffixText: _method == SplitMethod.percent ? '%' : null,
-                    ),
-                    keyboardType: TextInputType.numberWithOptions(
-                      decimal: _method != SplitMethod.weight,
-                    ),
-                    onChanged: (v) =>
-                        setState(() => (_drafts[_method] ??= {})[m.id] = v),
-                  ),
-                ),
-            const SectionTitle('分帳預覽'),
             if (previewError != null) Text(previewError),
-            if (shares != null)
-              Card(
-                child: Column(
-                  children: [
-                    for (final m in members.where(
-                      (m) => _selected.contains(m.id),
-                    ))
-                      ListTile(
-                        title: Text(m.name),
-                        subtitle: Text(Money.format(shares[m.id]!)),
-                      ),
-                  ],
+            ExpansionTile(
+              key: const ValueKey('expense-more'),
+              initiallyExpanded: _moreExpanded,
+              onExpansionChanged: (expanded) => _moreExpanded = expanded,
+              title: const Text('更多資料'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 12),
+              expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LedgerDateField(
+                  label: '消費日期',
+                  date: _date,
+                  onChanged: (v) => setState(() => _date = v),
                 ),
-              ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _category,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '分類'),
+                  items: [
+                    for (final category in categories)
+                      DropdownMenuItem(value: category, child: Text(category)),
+                  ],
+                  onChanged: (v) => setState(() => _category = v!),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  initialValue: _note,
+                  maxLines: 2,
+                  minLines: 1,
+                  decoration: const InputDecoration(labelText: '備註（選填）'),
+                  onChanged: (v) => _note = v,
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             if (_error != null)
               Text(
@@ -382,9 +419,14 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
               ),
             if (shares != null && _title.trim().isEmpty) const Text('請填寫項目名稱。'),
             FilledButton(
-              onPressed: _busy || shares == null || _title.trim().isEmpty
+              key: const ValueKey('expense-save'),
+              onPressed:
+                  _busy ||
+                      amount == null ||
+                      shares == null ||
+                      _title.trim().isEmpty
                   ? null
-                  : _save,
+                  : () => _save(amount!, inputs, shares!),
               child: Text(_busy ? '儲存中…' : '儲存消費'),
             ),
           ],
