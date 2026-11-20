@@ -1,0 +1,375 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../domain.dart';
+import '../state.dart';
+import '../ui.dart';
+import 'expense_screens.dart';
+import 'group_screens.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int tab = 0;
+  bool archived = false;
+
+  Future<void> create() async {
+    final id = await openPage<String>(context, const GroupFormScreen());
+    if (id != null && mounted) {
+      await openPage(context, GroupScreen(groupId: id));
+    }
+  }
+
+  Future<void> quickExpense(List<Ledger> active) async {
+    if (active.isEmpty) {
+      final id = await openPage<String>(context, const GroupFormScreen());
+      if (id != null && mounted) {
+        await openPage(context, ExpenseFormScreen(groupId: id));
+      }
+      return;
+    }
+    final id = active.length == 1
+        ? active.first.id
+        : await showModalBottomSheet<String>(
+            context: context,
+            showDragHandle: true,
+            useSafeArea: true,
+            builder: (ctx) => ListView(
+              shrinkWrap: true,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('選擇記帳群組'),
+                ),
+                for (final g in active)
+                  ListTile(
+                    leading: Icon(categoryIcon(g.category)),
+                    title: Text(g.name),
+                    onTap: () => Navigator.pop(ctx, g.id),
+                  ),
+              ],
+            ),
+          );
+    if (id != null && mounted) {
+      await openPage(context, ExpenseFormScreen(groupId: id));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = [...AppScope.of(context).data.groups]
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final active = groups.where((g) => !g.archived).toList();
+    final visible = groups.where((g) => g.archived == archived).toList();
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          [appName, '群組', '統計', '設定'][tab],
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          if (tab < 2)
+            IconButton(
+              tooltip: '新增群組',
+              onPressed: create,
+              icon: const Icon(Icons.group_add_outlined),
+            ),
+          const SizedBox(width: 6),
+        ],
+      ),
+      body: switch (tab) {
+        0 => PageBody(
+          children: [
+            _Summary(groups: groups),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: () => quickExpense(active),
+              icon: const Icon(Icons.add),
+              label: const Text('新增消費'),
+            ),
+            const SectionTitle('近期群組'),
+            if (active.isEmpty)
+              EmptyCard(
+                Icons.groups_outlined,
+                '建立第一個群組',
+                '為一起分帳的人開一本帳，從第一筆消費開始。',
+                action: OutlinedButton(
+                  onPressed: create,
+                  child: const Text('建立群組'),
+                ),
+              ),
+            for (final g in active.take(4)) _GroupCard(g),
+            if (active.length > 4)
+              TextButton(
+                onPressed: () => setState(() => tab = 1),
+                child: const Text('查看全部群組'),
+              ),
+          ],
+        ),
+        1 => PageBody(
+          children: [
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('使用中'),
+                  selected: !archived,
+                  onSelected: (_) => setState(() => archived = false),
+                ),
+                ChoiceChip(
+                  label: const Text('已封存'),
+                  selected: archived,
+                  onSelected: (_) => setState(() => archived = true),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (visible.isEmpty)
+              EmptyCard(
+                Icons.folder_open_outlined,
+                archived ? '沒有封存的群組' : '還沒有群組',
+                archived ? '已結清的群組可在群組明細封存。' : '建立群組後就能登記成員與共同消費。',
+                action: archived
+                    ? null
+                    : OutlinedButton(
+                        onPressed: create,
+                        child: const Text('建立群組'),
+                      ),
+              ),
+            for (final g in visible) _GroupCard(g),
+          ],
+        ),
+        2 => PageBody(
+          children: [
+            const SectionTitle('各群組消費'),
+            if (groups.isEmpty)
+              EmptyCard(
+                Icons.bar_chart,
+                '尚無群組統計',
+                '建立群組並記錄消費後，即可查看各分類合計。',
+                action: OutlinedButton(
+                  onPressed: create,
+                  child: const Text('建立群組'),
+                ),
+              ),
+            for (final g in groups)
+              Card(
+                child: ExpansionTile(
+                  key: PageStorageKey(g.id),
+                  title: Text(g.name),
+                  subtitle: Text('群組總消費 · ${Money.format(g.totalExpense)}'),
+                  children: [
+                    if (g.expenses.isEmpty)
+                      const ListTile(title: Text('尚無消費紀錄')),
+                    for (final category in g.expenseByCategory.entries)
+                      ListTile(
+                        title: Text(category.key),
+                        subtitle: Text(Money.format(category.value)),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        _ => const _Settings(),
+      },
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: tab,
+        onDestinationSelected: (v) => setState(() => tab = v),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: '首頁',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: '群組',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.bar_chart_outlined),
+            selectedIcon: Icon(Icons.bar_chart),
+            label: '統計',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: '設定',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Summary extends StatelessWidget {
+  const _Summary({required this.groups});
+  final List<Ledger> groups;
+  @override
+  Widget build(BuildContext context) {
+    final totals = BalanceService.overview(groups);
+    final net = totals.net;
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: inkGreen,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: DefaultTextStyle(
+        style: const TextStyle(color: Colors.white, fontSize: 15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: Colors.white,
+                  size: 19,
+                ),
+                SizedBox(width: 8),
+                Flexible(child: Text('我的淨餘額')),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '${net < 0
+                  ? '−'
+                  : net > 0
+                  ? '+'
+                  : ''}${Money.format(net.abs())}',
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w700,
+                color: net < 0 ? const Color(0xFFFFD0CA) : Colors.white,
+              ),
+            ),
+            const Divider(height: 32, color: Color(0xFF538573)),
+            Wrap(
+              spacing: 36,
+              runSpacing: 12,
+              children: [
+                _Metric('總應收', totals.receivable, const Color(0xFFC9F5D5)),
+                _Metric('總應付', totals.payable, const Color(0xFFFFD0CA)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Metric extends StatelessWidget {
+  const _Metric(this.label, this.amount, this.color);
+  final String label;
+  final int amount;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: const TextStyle(fontSize: 13)),
+      Text(
+        Money.format(amount),
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    ],
+  );
+}
+
+class _GroupCard extends StatelessWidget {
+  const _GroupCard(this.group);
+  final Ledger group;
+  @override
+  Widget build(BuildContext context) {
+    final balances = BalanceService.balances(group);
+    final value = balances[group.self.id]!;
+    final status = group.archived
+        ? '已封存'
+        : balances.values.any((v) => v != 0)
+        ? '未結清'
+        : '已結清';
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
+        leading: CircleAvatar(
+          backgroundColor: paleGreen,
+          foregroundColor: inkGreen,
+          child: Icon(categoryIcon(group.category)),
+        ),
+        title: Text(
+          group.name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${group.members.where((m) => m.isActive).length} 位成員 · $status',
+            ),
+            Text(
+              '我：${balanceLabel(value)}',
+              style: TextStyle(color: value < 0 ? debitRed : inkGreen),
+            ),
+          ],
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => openPage(context, GroupScreen(groupId: group.id)),
+      ),
+    );
+  }
+}
+
+class _Settings extends StatelessWidget {
+  const _Settings();
+  @override
+  Widget build(BuildContext context) {
+    final c = AppScope.of(context);
+    return PageBody(
+      children: [
+        const SectionTitle('個人設定'),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('我的預設名稱'),
+            subtitle: Text(c.data.defaultName),
+            trailing: const Icon(Icons.edit_outlined),
+            onTap: () => editName(
+              context,
+              title: '我的預設名稱',
+              initial: c.data.defaultName,
+              save: (name) => c.change((repo) => repo.setDefaultName(name)),
+            ),
+          ),
+        ),
+        const SectionTitle('關於帳本'),
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('本機離線儲存', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 8),
+                Text('帳本儲存在這台裝置，不會自動同步或備份。解除安裝、清除 App 資料或遺失裝置時，記帳資料可能遺失。'),
+                Divider(height: 28),
+                Text('$appName · 版本 $appVersion'),
+                SizedBox(height: 4),
+                Text('還款建議僅供核對，實際轉帳後請手動登記。'),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
