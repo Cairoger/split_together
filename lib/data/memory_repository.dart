@@ -6,6 +6,7 @@ class MemorySplitRepository extends LedgerRepository {
   AppAppearance _appearance = AppAppearance.light;
   final _groups = <String, Ledger>{};
   final _friends = <String, NewFriend>{};
+  final _quickMeals = <String, QuickMeal>{};
   BankAppChoice? _bankApp;
 
   @override
@@ -13,6 +14,11 @@ class MemorySplitRepository extends LedgerRepository {
     defaultName: _name,
     appearance: _appearance,
     bankApp: _bankApp,
+    quickMeals: _quickMeals.values.toList()
+      ..sort((a, b) {
+        final byDate = b.createdAt.compareTo(a.createdAt);
+        return byDate != 0 ? byDate : b.id.compareTo(a.id);
+      }),
     friends: [
       for (final f in _friends.values)
         SavedFriend(
@@ -25,6 +31,28 @@ class MemorySplitRepository extends LedgerRepository {
     groups: _groups.values.toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)),
   );
+
+  @override
+  Future<String> createFriend(String name) async {
+    final friend = newSavedFriend(name);
+    _friends[friend.id] = friend;
+    return friend.id;
+  }
+
+  @override
+  Future<void> saveQuickMeal(QuickMeal meal) async {
+    final saved = _quickMeals[meal.id];
+    if (saved != null) {
+      saved.verifyRetry(meal);
+      return;
+    }
+    if (meal.people.keys.any(
+      (id) => id != quickMealSelfId && !_friends.containsKey(id),
+    )) {
+      throw const FormatException('找不到常用朋友');
+    }
+    _quickMeals[meal.id] = meal;
+  }
 
   @override
   Future<void> writeName(String value) async {

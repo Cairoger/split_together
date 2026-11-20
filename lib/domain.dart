@@ -1,6 +1,8 @@
 import 'dart:collection';
 import 'dart:math' as math;
 
+part 'quick_meal.dart';
+
 enum SplitMethod { equal, exact, percent, weight }
 
 class Member {
@@ -159,12 +161,41 @@ class AppData {
     this.appearance = AppAppearance.light,
     this.friends = const [],
     this.bankApp,
+    this.quickMeals = const [],
   });
   final String defaultName;
   final AppAppearance appearance;
   final List<SavedFriend> friends;
   final BankAppChoice? bankApp;
   final List<Ledger> groups;
+  final List<QuickMeal> quickMeals;
+
+  Map<String, String> get quickMealPeople {
+    final sorted = friends.toList()
+      ..sort((a, b) {
+        final byName = a.name.compareTo(b.name);
+        return byName != 0 ? byName : a.id.compareTo(b.id);
+      });
+    final nameCounts = <String, int>{defaultName: 1};
+    for (final friend in sorted) {
+      nameCounts.update(friend.name, (n) => n + 1, ifAbsent: () => 1);
+    }
+    final labels = <String, String>{quickMealSelfId: defaultName};
+    final nextNumber = <String, int>{};
+    for (final friend in sorted) {
+      var label = friend.name;
+      if (nameCounts[label]! > 1) {
+        var number = nextNumber[label] ?? 1;
+        // 使用者也可能真的把朋友取名為「小林（朋友 1）」。
+        do {
+          label = '${friend.name}（朋友 ${number++}）';
+        } while (nameCounts.containsKey(label));
+        nextNumber[friend.name] = number;
+      }
+      labels[friend.id] = label;
+    }
+    return labels;
+  }
 }
 
 class Transfer {

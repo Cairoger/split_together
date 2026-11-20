@@ -5,18 +5,37 @@ import '../domain.dart';
 // sqflite runs version callbacks inside its opening transaction. Extend the
 // migration sequence here when adding a version, keeping existing records.
 Future<void> migrateLedger(Database db, int oldVersion, int newVersion) async {
-  if (oldVersion < 0 || newVersion > 2 || oldVersion >= newVersion) {
+  if (oldVersion < 0 || newVersion > 3 || oldVersion >= newVersion) {
     throw StateError('尚未支援此資料庫版本，請檢查應用程式版本');
   }
   final batch = db.batch();
   for (final statement in [
     if (oldVersion < 1) ..._schemaV1,
     if (oldVersion < 2 && newVersion >= 2) ..._schemaV2,
+    if (oldVersion < 3 && newVersion >= 3) ..._schemaV3,
   ]) {
     batch.execute(statement);
   }
   await batch.commit(noResult: true);
 }
+
+const _schemaV3 = [
+  '''CREATE TABLE quick_meals (
+    id TEXT PRIMARY KEY NOT NULL,
+    created_at INTEGER NOT NULL,
+    total_minor INTEGER NOT NULL CHECK (total_minor BETWEEN 1 AND ${Money.maxMinor}),
+    payer_id TEXT NOT NULL,
+    FOREIGN KEY (id, payer_id) REFERENCES quick_meal_people(meal_id, person_id)
+      DEFERRABLE INITIALLY DEFERRED
+  )''',
+  '''CREATE TABLE quick_meal_people (
+    meal_id TEXT NOT NULL REFERENCES quick_meals(id) ON DELETE CASCADE,
+    person_id TEXT NOT NULL,
+    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+    share_minor INTEGER NOT NULL CHECK (share_minor BETWEEN 0 AND ${Money.maxMinor}),
+    PRIMARY KEY (meal_id, person_id)
+  )''',
+];
 
 const _schemaV2 = [
   '''CREATE TABLE friends (

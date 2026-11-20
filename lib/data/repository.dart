@@ -11,6 +11,8 @@ String newId() => List.generate(
 
 abstract interface class SplitRepository {
   Future<AppData> load();
+  Future<String> createFriend(String name);
+  Future<void> saveQuickMeal(QuickMeal meal);
   Future<void> setBankApp(BankAppChoice? choice);
   Future<void> setFriendAccount(
     String friendId,
@@ -46,6 +48,9 @@ abstract interface class SplitRepository {
 
 typedef FriendAccount = ({String code, String number});
 typedef NewFriend = ({String id, String name, FriendAccount? account});
+
+NewFriend newSavedFriend(String name) =>
+    (id: newId(), name: _text(name, '朋友姓名'), account: null);
 
 FriendAccount? validateFriendAccount(String? bankCode, String? accountNumber) {
   if (bankCode == null && accountNumber == null) return null;

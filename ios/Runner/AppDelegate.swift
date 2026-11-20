@@ -38,6 +38,36 @@ import UIKit
         result(FlutterMethodNotImplemented)
       }
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "SplitTogetherMealShare") {
+      let shareChannel = FlutterMethodChannel(
+        name: "split_together/meal_share", binaryMessenger: registrar.messenger()
+      )
+      shareChannel.setMethodCallHandler { call, result in
+        guard call.method == "shareText" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        guard let text = call.arguments as? String,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          result(FlutterError(code: "empty-list", message: "沒有可分享的聚餐清單", details: nil))
+          return
+        }
+        guard let presenter = registrar.viewController,
+              presenter.viewIfLoaded?.window != nil,
+              presenter.presentedViewController == nil else {
+          result(FlutterError(code: "share-unavailable", message: "無法開啟系統分享選單", details: nil))
+          return
+        }
+        let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+          let bounds = presenter.view.bounds
+          popover.sourceView = presenter.view
+          popover.sourceRect = CGRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
+          popover.permittedArrowDirections = []
+        }
+        presenter.present(sheet, animated: true) { result(nil) }
+      }
+    }
   }
 
   private static func launchURL(for id: String) -> URL? {

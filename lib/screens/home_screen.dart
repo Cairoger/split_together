@@ -7,6 +7,7 @@ import 'bank_screen.dart';
 import 'friends_screen.dart';
 import 'expense_screens.dart';
 import 'group_screens.dart';
+import 'quick_meal_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -91,6 +92,12 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => quickExpense(active),
               icon: const Icon(Icons.add),
               label: const Text('新增消費'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => openPage<void>(context, const QuickMealScreen()),
+              icon: const Icon(Icons.restaurant_outlined),
+              label: const Text('快速聚餐'),
             ),
             const SectionTitle('近期群組'),
             if (active.isEmpty)

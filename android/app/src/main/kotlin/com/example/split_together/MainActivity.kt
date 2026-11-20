@@ -23,6 +23,29 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/bank_launcher")
             .setMethodCallHandler(::handleBankAction)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/meal_share")
+            .setMethodCallHandler(::handleMealShare)
+    }
+
+    private fun handleMealShare(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "shareText") {
+            result.notImplemented()
+            return
+        }
+        val text = call.arguments as? String
+        if (text.isNullOrBlank()) {
+            result.error("empty-list", "沒有可分享的聚餐清單", null)
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        if (startIfAvailable(Intent.createChooser(send, null))) {
+            result.success(null)
+        } else {
+            result.error("share-unavailable", "無法開啟系統分享選單", null)
+        }
     }
 
     private fun handleBankAction(call: MethodCall, result: MethodChannel.Result) {

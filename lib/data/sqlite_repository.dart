@@ -34,7 +34,7 @@ class SqliteSplitRepository extends LedgerRepository {
     return driver.openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) => migrateLedger(db, 0, version),
         onUpgrade: migrateLedger,
@@ -72,6 +72,7 @@ class SqliteSplitRepository extends LedgerRepository {
             ? AppAppearance.dark
             : AppAppearance.light,
         groups: await _loadGroups(tx),
+        quickMeals: await _loadQuickMeals(tx),
         bankApp: _decodeBankApp(settings['bank_app']),
         friends: [
           for (final row in friends)
@@ -85,6 +86,88 @@ class SqliteSplitRepository extends LedgerRepository {
       );
     });
   }
+
+  @override
+  Future<String> createFriend(String name) async {
+    final friend = newSavedFriend(name);
+    final db = await _database;
+    await _insertFriends(db, [friend]);
+    return friend.id;
+  }
+
+  @override
+  Future<void> saveQuickMeal(QuickMeal meal) async {
+    final db = await _database;
+    await db.transaction((tx) async {
+      final prior = await _loadQuickMeals(tx, id: meal.id);
+      if (prior.isNotEmpty) {
+        prior.single.verifyRetry(meal);
+        return;
+      }
+      final batch = tx.batch();
+      batch.insert('quick_meals', {
+        'id': meal.id,
+        'created_at': meal.createdAt.microsecondsSinceEpoch,
+        'total_minor': meal.total,
+        'payer_id': meal.payerId,
+      });
+      for (final person in meal.people.entries) {
+        if (person.key != quickMealSelfId) await _checkFriend(tx, person.key);
+        batch.insert('quick_meal_people', {
+          'meal_id': meal.id,
+          'person_id': person.key,
+          'name': person.value,
+          'share_minor': meal.shares[person.key]!,
+        });
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
+  Future<List<QuickMeal>> _loadQuickMeals(
+    DatabaseExecutor tx, {
+    String? id,
+  }) async {
+    final args = id == null ? null : [id];
+    final meals = await tx.query(
+      'quick_meals',
+      where: id == null ? null : 'id = ?',
+      whereArgs: args,
+      orderBy: 'created_at DESC, id DESC',
+    );
+    if (meals.isEmpty) return [];
+    final members = await tx.query(
+      'quick_meal_people',
+      where: id == null ? null : 'meal_id = ?',
+      whereArgs: args,
+      orderBy: 'rowid',
+    );
+    final participants = <String, List<_Row>>{};
+    for (final row in members) {
+      (participants[row['meal_id'] as String] ??= []).add(row);
+    }
+    return [
+      for (final row in meals)
+        _readQuickMeal(row, participants[row['id']] ?? const []),
+    ];
+  }
+
+  QuickMeal _readQuickMeal(_Row row, List<_Row> members) => QuickMeal.recorded(
+    id: row['id'] as String,
+    createdAt: DateTime.fromMicrosecondsSinceEpoch(
+      row['created_at'] as int,
+      isUtc: true,
+    ),
+    total: row['total_minor'] as int,
+    payerId: row['payer_id'] as String,
+    people: {
+      for (final m in members) m['person_id'] as String: m['name'] as String,
+    },
+    shares: {
+      for (final m in members)
+        m['person_id'] as String: m['share_minor'] as int,
+    },
+  );
 
   @override
   Future<void> writeName(String value) => _writeSetting('default_name', value);

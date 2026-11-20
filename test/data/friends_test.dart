@@ -226,7 +226,7 @@ void main() {
     expect(data.bankApp?.label, '測試 App');
     expect(await repo.readFriendAccount(id), fixtureNumber);
     final db = await databaseFactoryFfi.openDatabase(location);
-    expect(await db.getVersion(), 2);
+    expect(await db.getVersion(), 3);
     final stored =
         (await db.query('friends')).single['account_cipher'] as Uint8List;
     expect(stored.length, greaterThan(fixtureNumber.length));
