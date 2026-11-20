@@ -49,6 +49,7 @@ class _ExpenseSplitControlsState extends State<ExpenseSplitControls> {
     final method = widget.method;
     final isPercent = method == SplitMethod.percent;
     final oldValue = widget.values[member.id]!;
+    FocusManager.instance.primaryFocus?.unfocus();
     final value = await showDialog<int>(
       context: context,
       builder: (_) => _ValueDialog(

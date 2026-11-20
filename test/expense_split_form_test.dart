@@ -211,6 +211,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('金額欄有焦點時開啟精確輸入，套用後不會重開表單鍵盤', (tester) async {
+    final repo = MemorySplitRepository();
+    await repo.createGroup('週末', '聚餐', ['小安']);
+    final self = (await repo.load()).groups.single.self.id;
+    await _launch(tester, repo, size: const Size(480, 1400));
+    await _newExpense(tester, '100');
+    await _mode(tester, 'percent');
+    final amountField = _key('expense-amount');
+    await _enter(tester, amountField, '100');
+    final amountFocus = tester
+        .widget<EditableText>(
+          find.descendant(of: amountField, matching: find.byType(EditableText)),
+        )
+        .focusNode;
+    await _show(tester, _key('percent-value-$self'));
+    expect(amountFocus.hasFocus, isTrue);
+    expect(tester.testTextInput.isVisible, isTrue);
+    await _precise(tester, 'percent-value-$self', '60');
+    expect(amountFocus.hasFocus, isFalse);
+    expect(tester.testTextInput.isVisible, isFalse);
+  });
+
   testWidgets('多人百分比不足顯示尚未分配，105% 隱藏圖表和金額，保留一人可穩定分完尾差', (tester) async {
     final repo = MemorySplitRepository();
     await repo.createGroup('週末', '生活', ['小安', '小林']);
