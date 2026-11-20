@@ -36,6 +36,12 @@ flutter build apk --debug
 
 建置後的 APK 位於 `build/app/outputs/flutter-apk/app-debug.apk`。iOS 原生建置與裝置驗證需使用 macOS 與 Xcode。Windows 在此專案中用於開發及測試。
 
+## 從 GitHub 下載 Android 測試版
+
+推送至 `main`、向 `main` 提出或更新 Pull Request 時，GitHub Actions 會檢查程式碼、執行測試並打包 APK。也可以在「Actions → Android preview」手動觸發。建置成功後，在該次執行頁面下方的「Artifacts」下載 ZIP，解壓縮後即可在 Android 測試裝置上安裝 APK。
+
+測試版在桌面顯示為 **SplitTogether Preview**，有獨立的 App ID（`com.example.split_together.preview`）和帳本，可與原本的 SplitTogether 並存。它不會讀取或更新原本的帳本，請不要解除安裝原本的 App。各次建置的測試簽章可能不同；如果 Android 拒絕更新，請換一台測試裝置或模擬器，或僅移除 **Preview** 後重裝。移除 Preview 會刪除其中的測試資料，請勿將唯一一份帳本保存於此。
+
 ## 程式與資料
 
 | 位置 | 用途 |

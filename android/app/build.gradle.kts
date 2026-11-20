@@ -4,6 +4,9 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Only CI preview builds pass this opt-in property.
+val splitTogetherPreview = providers.gradleProperty("splitTogetherPreview").orNull == "true"
+
 android {
     namespace = "com.example.split_together"
     compileSdk = flutter.compileSdkVersion
@@ -17,6 +20,7 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.split_together"
+        manifestPlaceholders["splitTogetherAppLabel"] = "SplitTogether"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -30,6 +34,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (splitTogetherPreview) {
+                applicationIdSuffix = ".preview"
+                manifestPlaceholders["splitTogetherAppLabel"] = "SplitTogether Preview"
+            }
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.

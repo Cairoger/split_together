@@ -1,0 +1,73 @@
+name: Android preview
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-preview:
+    name: Test and build preview APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter SDK
+        env:
+          FLUTTER_VERSION: '3.50.0'
+          FLUTTER_SHA256: 6ea2d806fd57269ae783e6788e2a81fc26eaad782f1e0d0ff38623bb765ff9f5
+        run: |
+          archive="$RUNNER_TEMP/flutter.tar.xz"
+          curl --fail --show-error --silent --location --retry 3 \
+            "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
+            --output "$archive"
+          echo "$FLUTTER_SHA256  $archive" | sha256sum --check
+          tar --extract --file="$archive" --directory="$RUNNER_TEMP"
+          rm "$archive"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Analyze and test
+        run: |
+          flutter --version
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub
+          flutter test --no-pub
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+
+      - name: Build preview APK
+        env:
+          ORG_GRADLE_PROJECT_splitTogetherPreview: 'true'
+        run: flutter build apk --debug --no-pub
+
+      - name: Verify package and label
+        run: |
+          apk="build/app/outputs/flutter-apk/app-debug.apk"
+          inspection="$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk")"
+          grep -q "^package: name='com\.example\.split_together\.preview' " <<< "$inspection"
+          grep -Fxq "application-label:'SplitTogether Preview'" <<< "$inspection"
+          mkdir -p artifacts
+          cp "$apk" "artifacts/SplitTogether-Preview-${GITHUB_SHA::12}.apk"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: SplitTogether-Android-Preview-${{ github.sha }}
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 14
