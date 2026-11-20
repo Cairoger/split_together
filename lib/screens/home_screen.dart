@@ -213,26 +213,28 @@ class _Summary extends StatelessWidget {
   Widget build(BuildContext context) {
     final totals = BalanceService.overview(groups);
     final net = totals.net;
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: inkGreen,
+        color: colors.surface,
+        border: Border.all(color: colors.outlineVariant),
         borderRadius: BorderRadius.circular(22),
       ),
       child: DefaultTextStyle(
-        style: const TextStyle(color: Colors.white, fontSize: 15),
+        style: TextStyle(color: colors.onSurface, fontSize: 15),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
                 Icon(
                   Icons.account_balance_wallet_outlined,
-                  color: Colors.white,
+                  color: colors.primary,
                   size: 19,
                 ),
-                SizedBox(width: 8),
-                Flexible(child: Text('我的淨餘額')),
+                const SizedBox(width: 8),
+                const Flexible(child: Text('我的淨餘額')),
               ],
             ),
             const SizedBox(height: 12),
@@ -245,16 +247,24 @@ class _Summary extends StatelessWidget {
               style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.w700,
-                color: net < 0 ? const Color(0xFFFFD0CA) : Colors.white,
+                color: balanceColor(colors, net),
               ),
             ),
-            const Divider(height: 32, color: Color(0xFF538573)),
+            Divider(height: 32, color: colors.outlineVariant),
             Wrap(
               spacing: 36,
               runSpacing: 12,
               children: [
-                _Metric('總應收', totals.receivable, const Color(0xFFC9F5D5)),
-                _Metric('總應付', totals.payable, const Color(0xFFFFD0CA)),
+                _Metric(
+                  '總應收',
+                  totals.receivable,
+                  balanceColor(colors, totals.receivable),
+                ),
+                _Metric(
+                  '總應付',
+                  totals.payable,
+                  balanceColor(colors, -totals.payable),
+                ),
               ],
             ),
           ],
@@ -293,6 +303,7 @@ class _GroupCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final balances = BalanceService.balances(group);
     final value = balances[group.self.id]!;
+    final colors = Theme.of(context).colorScheme;
     final status = group.archived
         ? '已封存'
         : balances.values.any((v) => v != 0)
@@ -302,8 +313,8 @@ class _GroupCard extends StatelessWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
         leading: CircleAvatar(
-          backgroundColor: paleGreen,
-          foregroundColor: inkGreen,
+          backgroundColor: colors.primaryContainer,
+          foregroundColor: colors.onPrimaryContainer,
           child: Icon(categoryIcon(group.category)),
         ),
         title: Text(
@@ -318,7 +329,7 @@ class _GroupCard extends StatelessWidget {
             ),
             Text(
               '我：${balanceLabel(value)}',
-              style: TextStyle(color: value < 0 ? debitRed : inkGreen),
+              style: TextStyle(color: balanceColor(colors, value)),
             ),
           ],
         ),
@@ -329,11 +340,35 @@ class _GroupCard extends StatelessWidget {
   }
 }
 
-class _Settings extends StatelessWidget {
+class _Settings extends StatefulWidget {
   const _Settings();
+  @override
+  State<_Settings> createState() => _SettingsState();
+}
+
+class _SettingsState extends State<_Settings> {
+  bool savingAppearance = false;
+
+  Future<void> selectAppearance(AppAppearance appearance) async {
+    final controller = AppScope.of(context);
+    if (savingAppearance || controller.data.appearance == appearance) return;
+    setState(() => savingAppearance = true);
+    try {
+      await controller.change((repo) => repo.setAppearance(appearance));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(errorMessage(error))));
+      }
+    } finally {
+      if (mounted) setState(() => savingAppearance = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = AppScope.of(context);
+    final colors = Theme.of(context).colorScheme;
     return PageBody(
       children: [
         const SectionTitle('個人設定'),
@@ -350,6 +385,36 @@ class _Settings extends StatelessWidget {
               save: (name) => c.change((repo) => repo.setDefaultName(name)),
             ),
           ),
+        ),
+        const SectionTitle('外觀'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: AppAppearance.values.map((mode) {
+            final selected = c.data.appearance == mode;
+            final foreground = selected ? colors.onPrimary : colors.onSurface;
+            final (label, icon) = switch (mode) {
+              AppAppearance.light => ('光亮模式', Icons.light_mode_outlined),
+              AppAppearance.dark => ('黑暗模式', Icons.dark_mode_outlined),
+            };
+            return ChoiceChip(
+              label: Text(label),
+              selected: selected,
+              backgroundColor: colors.surface,
+              selectedColor: colors.primary,
+              disabledColor: selected ? colors.primary : colors.surface,
+              labelStyle: TextStyle(color: foreground),
+              avatar: Icon(
+                selected ? Icons.check : icon,
+                size: 18,
+                color: foreground,
+              ),
+              showCheckmark: false,
+              onSelected: savingAppearance
+                  ? null
+                  : (_) => selectAppearance(mode),
+            );
+          }).toList(),
         ),
         const SectionTitle('關於帳本'),
         const Card(

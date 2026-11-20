@@ -88,10 +88,13 @@ class _SettlementScreenState extends State<SettlementScreen> {
           Text(group.name, style: Theme.of(context).textTheme.headlineSmall),
           const SectionTitle('還款建議'),
           if (suggestions.isEmpty)
-            const Card(
+            Card(
               child: ListTile(
-                leading: Icon(Icons.check_circle_outline, color: inkGreen),
-                title: Text('所有帳目已結清'),
+                leading: Icon(
+                  Icons.check_circle_outline,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                title: const Text('所有帳目已結清'),
               ),
             )
           else ...[
@@ -129,11 +132,10 @@ class _SettlementScreenState extends State<SettlementScreen> {
                     subtitle: Text(
                       balanceLabel(balances[m.id]!),
                       style: TextStyle(
-                        color: switch (balances[m.id]!.sign) {
-                          -1 => debitRed,
-                          1 => inkGreen,
-                          _ => muted,
-                        },
+                        color: balanceColor(
+                          Theme.of(context).colorScheme,
+                          balances[m.id]!,
+                        ),
                       ),
                     ),
                   ),
@@ -142,7 +144,10 @@ class _SettlementScreenState extends State<SettlementScreen> {
           ),
           const SectionTitle('還款紀錄'),
           if (_error != null)
-            Text(_error!, style: const TextStyle(color: debitRed)),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           if (group.repayments.isEmpty) const Text('尚無還款紀錄。'),
           for (final payment in group.repayments)
             Card(
@@ -349,7 +354,10 @@ class _RepaymentFormState extends State<_RepaymentForm> {
             ),
             const SizedBox(height: 20),
             if (_error != null)
-              Text(_error!, style: const TextStyle(color: debitRed)),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             FilledButton(
               onPressed: _busy || invalid != null || from == null || to == null
                   ? null

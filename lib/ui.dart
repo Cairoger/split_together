@@ -4,11 +4,13 @@ import 'domain.dart';
 
 const appName = 'SplitTogether';
 const appVersion = '1.0.0';
-const inkGreen = Color(0xFF145C48);
-const debitRed = Color(0xFFA13632);
-const paleGreen = Color(0xFFE2F1E9);
-const muted = Color(0xFF52675F);
 const groupCategories = ['旅遊', '聚餐', '生活', '其他'];
+
+Color balanceColor(ColorScheme colors, int amount) => switch (amount.sign) {
+  1 => colors.primary,
+  -1 => colors.error,
+  _ => colors.onSurfaceVariant,
+};
 
 String balanceLabel(int value) => switch (value.compareTo(0)) {
   1 => '應收 +${Money.format(value)}',
@@ -117,8 +119,8 @@ class EmptyCard extends StatelessWidget {
       child: Column(
         children: [
           CircleAvatar(
-            backgroundColor: paleGreen,
-            foregroundColor: inkGreen,
+            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
             child: Icon(icon),
           ),
           const SizedBox(height: 12),
@@ -131,7 +133,9 @@ class EmptyCard extends StatelessWidget {
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: muted),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           if (action != null)
             Padding(padding: const EdgeInsets.only(top: 12), child: action),

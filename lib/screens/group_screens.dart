@@ -124,7 +124,10 @@ class _GroupFormScreenState extends State<GroupFormScreen> {
           if (error != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: Text(error!, style: const TextStyle(color: debitRed)),
+              child: Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
           const SizedBox(height: 20),
           FilledButton(
@@ -205,7 +208,10 @@ class GroupScreen extends StatelessWidget {
                     spacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Icon(categoryIcon(g.category), color: inkGreen),
+                      Icon(
+                        categoryIcon(g.category),
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       Text(
                         '${g.category}${g.archived ? ' · 已封存' : ''} · 群組總消費',
                       ),
@@ -223,7 +229,7 @@ class GroupScreen extends StatelessWidget {
                   Text(
                     '我：${balanceLabel(value)}',
                     style: TextStyle(
-                      color: value < 0 ? debitRed : inkGreen,
+                      color: balanceColor(Theme.of(context).colorScheme, value),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -397,12 +403,15 @@ class MembersScreen extends StatelessWidget {
                 ),
                 leading: Icon(
                   m.isActive ? Icons.person_outline : Icons.person_off_outlined,
-                  color: muted,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 subtitle: Text(
                   balanceLabel(balances[m.id]!),
                   style: TextStyle(
-                    color: balances[m.id]! < 0 ? debitRed : inkGreen,
+                    color: balanceColor(
+                      Theme.of(context).colorScheme,
+                      balances[m.id]!,
+                    ),
                   ),
                 ),
                 trailing: g.archived

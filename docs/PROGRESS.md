@@ -1,5 +1,13 @@
 # SplitTogether 開發進度
 
+## 2026-11-20 · 光亮模式與黑暗模式
+
+「設定 → 外觀」可切換整個 App 的顯示模式。光亮模式使用米白背景、墨綠色應收與磚紅色應付；黑暗模式使用深墨綠背景、薄荷綠色應收與珊瑚色應付。偏好存入既有 SQLite 設定表，舊帳本預設為光亮模式。
+
+- `flutter analyze` 通過。完整 `flutter test` 共 32 項通過，涵蓋重新啟動、連點、儲存失敗後重試，以及切換後保留帳目與餘額。
+- `flutter build apk --release --split-per-abi` 通過。ARM64 手機版輸出為 `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`，已驗證架構與既有簽章。
+- Android 17 模擬器以 x86_64 release 版實測。切換後仍停留在設定頁，背景取樣由 `#F6F8F7` 變為 `#101A17`；強制停止並重開後，首頁與設定仍為黑暗模式，再切回光亮模式時顏色正確還原。
+
 ## 2026-11-20 · MVP 1.0
 
 沿用既有 Flutter 計數器 App 的套件名稱、Android 和 iOS 專案。開始時 App 目錄沒有 Git 儲存庫，基準 `flutter analyze --no-pub` 及原有的計數器測試均通過。開發環境為 Windows、Flutter 3.50.0 stable、Dart 3.14.0。介面沿用既有 `material_ui`，依鎖定檔解析相容的 SQLite 套件。
