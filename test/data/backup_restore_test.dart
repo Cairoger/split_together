@@ -254,6 +254,38 @@ void main() {
     });
   }
 
+  test('啟用檔案備份後重開既有第 4 版帳本，可直接匯出並保留本機銀行資料', () async {
+    final path = p.join((await _temp()).path, 'split_together.db');
+    final key = await AesGcm.with256bits().newSecretKey();
+    SqliteSplitRepository openLedger() => SqliteSplitRepository(
+      path: path,
+      factory: databaseFactoryFfi,
+      accountCipher: AccountCipher(loadKey: (_) async => key),
+    );
+
+    final original = openLedger();
+    addTearDown(original.close);
+    await _populate(original);
+    final before = await original.load();
+    final existingDb = await databaseFactoryFfi.openDatabase(path);
+    expect(await existingDb.getVersion(), 4);
+    await original.close();
+
+    final reopened = openLedger();
+    addTearDown(reopened.close);
+    final snapshot = await reopened.createBackup(_date);
+    final expected = LedgerBackup.fromData(before, _date);
+    expect(await snapshot.encode(), orderedEquals(await expected.encode()));
+    final data = await reopened.load();
+    expect(data.defaultName, before.defaultName);
+    expect(data.bankApp?.id, before.bankApp?.id);
+    expect(data.friends.single.lastFour, before.friends.single.lastFour);
+    expect(
+      await reopened.readFriendAccount(data.friends.single.id),
+      _testAccount,
+    );
+  });
+
   test('還原最後一筆參與者時失敗，SQLite 交易連先前寫入的帳目也回滾，之後可重試', () async {
     final source = MemorySplitRepository();
     await _populate(source);

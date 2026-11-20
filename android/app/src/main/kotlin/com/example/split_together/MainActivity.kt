@@ -18,7 +18,7 @@ import java.text.Collator
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
-    private val driveBackup by lazy { DriveBackupAuth(this) }
+    private val backupFiles by lazy { FileBackupPicker(this) }
     private val appPickerWorker = Executors.newSingleThreadExecutor()
     private val officialPackages = setOf(
         "com.chinatrust.mobilebank", "tw.com.taishinbank.mobile", "tw.gov.post.mpost"
@@ -26,8 +26,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/drive_backup")
-            .setMethodCallHandler(driveBackup::handle)
+        // 舊版僅用這份偏好儲存連結帳戶名稱與備份時間，與 SQLite 帳本分開。
+        applicationContext.deleteSharedPreferences("drive_backup")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/backup_file_picker")
+            .setMethodCallHandler(backupFiles::handle)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/bank_launcher")
             .setMethodCallHandler(::handleBankAction)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/meal_share")
@@ -174,15 +176,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    @Deprecated("Activity result bridge for Google authorization")
+    @Deprecated("Activity result bridge for the system file picker")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (!driveBackup.onActivityResult(requestCode, resultCode, data)) {
+        if (!backupFiles.onActivityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }
 
     override fun onDestroy() {
-        driveBackup.close()
+        backupFiles.close()
         appPickerWorker.shutdownNow()
         super.onDestroy()
     }

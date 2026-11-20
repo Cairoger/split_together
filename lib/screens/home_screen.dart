@@ -490,7 +490,7 @@ class _SettingsState extends State<_Settings> {
           child: ListTile(
             leading: const Icon(Icons.cloud_outlined),
             title: const Text('備份與還原'),
-            subtitle: const Text('使用 Google Drive 手動備份帳本'),
+            subtitle: const Text('匯出帳本檔案，或從備份檔還原'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => openPage<void>(context, const BackupScreen()),
           ),
