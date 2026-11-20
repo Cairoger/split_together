@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
+    show defaultTargetPlatform, TargetPlatform, Uint8List;
 import 'package:material_ui/material_ui.dart';
 
 import '../bank_apps.dart';
@@ -18,6 +18,22 @@ class BankAppScreen extends StatefulWidget {
 class _BankAppScreenState extends State<BankAppScreen> {
   bool busy = false;
   String? error;
+  Future<List<BankAppChoice>>? installed;
+  final search = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (BankLauncher.canListAndroidApps) {
+      installed = BankLauncher.listAndroidApps();
+    }
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
 
   Future<void> select(
     Future<BankAppChoice?> Function() choose, {
@@ -32,6 +48,15 @@ class _BankAppScreenState extends State<BankAppScreen> {
     try {
       final choice = await choose();
       if ((choice == null && !allowClear) || !mounted) return;
+      if (choice != null &&
+          BankLauncher.canListAndroidApps &&
+          !await BankLauncher.isAndroidAppAvailable(choice.id)) {
+        if (mounted) {
+          setState(() => error = '這個 App 已無法開啟，未變更預設選擇。');
+        }
+        return;
+      }
+      if (!mounted) return;
       await c.change((r) => r.setBankApp(choice));
       if (mounted) Navigator.pop(context);
     } catch (_) {
@@ -98,9 +123,197 @@ class _BankAppScreenState extends State<BankAppScreen> {
     );
   }
 
+  Widget _androidPicker(BankAppChoice? current) {
+    final colors = Theme.of(context).colorScheme;
+    return PopScope(
+      canPop: !busy,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('我的轉帳 App'),
+          bottom: busy
+              ? const PreferredSize(
+                  preferredSize: Size.fromHeight(4),
+                  child: LinearProgressIndicator(),
+                )
+              : null,
+        ),
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: TextField(
+                  controller: search,
+                  enabled: !busy,
+                  onChanged: (_) => setState(() {}),
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    labelText: '搜尋已安裝的 App',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: search.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: '清除搜尋',
+                            onPressed: busy
+                                ? null
+                                : () => setState(search.clear),
+                            icon: const Icon(Icons.clear),
+                          ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                  ),
+                ),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(error!, style: TextStyle(color: colors.error)),
+                  ),
+                ),
+              Expanded(
+                child: FutureBuilder<List<BankAppChoice>>(
+                  future: installed,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('無法讀取已安裝的 App。'),
+                            TextButton(
+                              onPressed: () => setState(() {
+                                installed = BankLauncher.listAndroidApps();
+                              }),
+                              child: const Text('重試'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    final apps = snapshot.requireData;
+                    final knownIds = bankApps.map((app) => app.id).toSet();
+                    final labelCounts = <String, int>{};
+                    for (final app in apps) {
+                      final label = app.label.toLowerCase();
+                      labelCounts.update(
+                        label,
+                        (value) => value + 1,
+                        ifAbsent: () => 1,
+                      );
+                    }
+                    final query = search.text.trim().toLowerCase();
+                    final visible = apps.where((app) {
+                      final label = app.label.toLowerCase();
+                      return label.contains(query) ||
+                          (labelCounts[label]! > 1 &&
+                              app.id.toLowerCase().contains(query));
+                    }).toList();
+                    final recommended = visible.where(
+                      (app) => knownIds.contains(app.id),
+                    );
+                    final others = visible.where(
+                      (app) => !knownIds.contains(app.id),
+                    );
+                    final rows = <Object>[
+                      if (recommended.isNotEmpty) ...['常用銀行', ...recommended],
+                      if (others.isNotEmpty) ...['其他已安裝的 App', ...others],
+                    ];
+                    if (rows.isEmpty) {
+                      return Center(
+                        child: Text(
+                          apps.isEmpty ? '沒有可選擇的 App。' : '找不到符合的 App。',
+                        ),
+                      );
+                    }
+                    return ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      itemCount: rows.length,
+                      itemBuilder: (context, index) {
+                        final row = rows[index];
+                        if (row is String) {
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+                            child: Text(
+                              row,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          );
+                        }
+                        final app = row as BankAppChoice;
+                        final selected = app.id == current?.id;
+                        return ListTile(
+                          key: ValueKey(app.id),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          selected: selected,
+                          selectedTileColor: colors.secondaryContainer,
+                          selectedColor: colors.onSecondaryContainer,
+                          leading: _InstalledAppIcon(id: app.id),
+                          title: Text(
+                            app.label,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: labelCounts[app.label.toLowerCase()]! > 1
+                              ? Text(
+                                  app.id,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                )
+                              : null,
+                          trailing: selected
+                              ? const Icon(
+                                  Icons.check_circle,
+                                  semanticLabel: '已選取',
+                                )
+                              : null,
+                          onTap: busy
+                              ? null
+                              : () {
+                                  FocusScope.of(context).unfocus();
+                                  select(() async => app);
+                                },
+                        );
+                      },
+                      findChildIndexCallback: (key) {
+                        if (key is! ValueKey<String>) return null;
+                        final index = rows.indexWhere(
+                          (row) => row is BankAppChoice && row.id == key.value,
+                        );
+                        return index < 0 ? null : index;
+                      },
+                    );
+                  },
+                ),
+              ),
+              if (current != null)
+                TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => select(() async => null, allowClear: true),
+                  child: const Text('清除預設選擇'),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = AppScope.of(context).data.bankApp;
+    if (BankLauncher.canListAndroidApps) return _androidPicker(current);
     final choices = [
       ...bankApps,
       if (current != null && !bankApps.any((b) => b.id == current.id)) current,
@@ -128,12 +341,6 @@ class _BankAppScreenState extends State<BankAppScreen> {
                 onTap: busy ? null : () => select(() async => choice),
               ),
             ),
-          if (defaultTargetPlatform == TargetPlatform.android)
-            ListTile(
-              leading: const Icon(Icons.apps_outlined),
-              title: const Text('選擇其他已安裝的 App'),
-              onTap: busy ? null : () => select(BankLauncher.pickAndroidApp),
-            ),
           if (defaultTargetPlatform == TargetPlatform.iOS)
             ListTile(
               leading: const Icon(Icons.launch),
@@ -153,6 +360,48 @@ class _BankAppScreenState extends State<BankAppScreen> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _InstalledAppIcon extends StatefulWidget {
+  const _InstalledAppIcon({required this.id});
+  final String id;
+
+  @override
+  State<_InstalledAppIcon> createState() => _InstalledAppIconState();
+}
+
+class _InstalledAppIconState extends State<_InstalledAppIcon> {
+  late final Future<Uint8List?> image = BankLauncher.androidAppIcon(widget.id);
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    Widget fallback() => ColoredBox(
+      color: colors.surfaceContainerHighest,
+      child: Icon(
+        Icons.apps_outlined,
+        color: colors.onSurfaceVariant,
+        size: 22,
+      ),
+    );
+    return SizedBox.square(
+      dimension: 40,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: FutureBuilder<Uint8List?>(
+          future: image,
+          builder: (context, snapshot) => snapshot.data == null
+              ? fallback()
+              : Image.memory(
+                  snapshot.data!,
+                  fit: BoxFit.contain,
+                  excludeFromSemantics: true,
+                  errorBuilder: (context, error, stack) => fallback(),
+                ),
+        ),
       ),
     );
   }

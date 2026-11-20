@@ -64,7 +64,143 @@ Future<bool> _canSave(WidgetTester tester) async {
   return tester.widget<FilledButton>(button).onPressed != null;
 }
 
+Future<void> _saveMeal(
+  WidgetTester tester,
+  List<String> attendees,
+  String payer,
+) async {
+  for (final id in attendees) {
+    await _tap(tester, _attendee(id));
+  }
+  await _tap(tester, _payer(payer));
+  await _amount(tester, '900');
+  expect(_key('meal-bank-open'), findsNothing);
+  await _tap(tester, _key('meal-save'));
+  expect(find.text('聚餐分帳結果'), findsOneWidget);
+}
+
 void main() {
+  testWidgets('快速聚餐只有本人應付時顯示轉帳入口，設定或取消後返回同一餐', (tester) async {
+    final repo = MemorySplitRepository();
+    final lin = await repo.createFriend('小林');
+    final an = await repo.createFriend('小安');
+    const bank = MethodChannel('split_together/bank_launcher');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(bank, (call) async {
+      calls.add(call);
+      return switch (call.method) {
+        'listApps' => [
+          {'id': 'com.chinatrust.mobilebank', 'label': '中國信託行動銀行'},
+        ],
+        'isAppAvailable' || 'openApp' => true,
+        _ => null,
+      };
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(bank, null));
+
+    await _launch(tester, repo);
+    await _saveMeal(tester, [quickMealSelfId, lin, an], lin);
+    final open = _key('meal-bank-open');
+    await _show(tester, open);
+    expect(open, findsOneWidget);
+    expect(find.text(r'你要轉給小林 NT$300'), findsOneWidget);
+    expect(find.text('尚未儲存收款帳號'), findsOneWidget);
+    expect(_key('meal-bank-copy-account'), findsNothing);
+    final saved = (await repo.load()).quickMeals.single;
+
+    await _tap(tester, open);
+    expect(find.text('我的轉帳 App'), findsOneWidget);
+    await _tap(tester, find.byType(BackButton));
+    expect(find.text('聚餐分帳結果'), findsOneWidget);
+    expect((await repo.load()).bankApp, isNull);
+
+    await _tap(tester, open);
+    await _tap(tester, find.text('中國信託行動銀行'));
+    expect(find.text('聚餐分帳結果'), findsOneWidget);
+    expect(find.text('開啟中國信託行動銀行'), findsOneWidget);
+    expect(calls.any((call) => call.method == 'openApp'), isFalse);
+    await _tap(tester, open);
+    expect(
+      calls
+          .where((call) => call.method == 'openApp')
+          .map((call) => call.arguments),
+      ['com.chinatrust.mobilebank'],
+    );
+    final data = await repo.load();
+    expect(data.quickMeals.single.id, saved.id);
+    expect(data.quickMeals.single.shares, saved.shares);
+    expect(data.groups, isEmpty);
+  });
+
+  testWidgets('本人收款或未出席時不顯示快速聚餐的轉帳入口', (tester) async {
+    final repo = MemorySplitRepository();
+    final lin = await repo.createFriend('小林');
+    final an = await repo.createFriend('小安');
+    await _launch(tester, repo);
+    await _saveMeal(tester, [quickMealSelfId, lin, an], quickMealSelfId);
+    expect(_key('meal-bank-open'), findsNothing);
+    expect(_key('meal-bank-copy-account'), findsNothing);
+
+    await _tap(tester, find.byType(BackButton));
+    await _tap(tester, find.text('快速聚餐'));
+    await _saveMeal(tester, [lin, an], lin);
+    expect(_key('meal-bank-open'), findsNothing);
+    expect(_key('meal-bank-copy-account'), findsNothing);
+    expect((await repo.load()).quickMeals.length, 2);
+  });
+
+  testWidgets('快速聚餐收款帳號只遮罩顯示或明確複製，不進分享、不預填', (tester) async {
+    final repo = MemorySplitRepository();
+    final lin = await repo.createFriend('小林');
+    const account = '000123456789';
+    const bankChoice = BankAppChoice(
+      id: 'tw.com.taishinbank.mobile',
+      label: '台新行動銀行',
+    );
+    await repo.setFriendAccount(lin, '822', account);
+    await repo.setBankApp(bankChoice);
+    const bank = MethodChannel('split_together/bank_launcher');
+    const share = MethodChannel('split_together/meal_share');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final bankCalls = <MethodCall>[];
+    final sharing = <String>[];
+    messenger.setMockMethodCallHandler(bank, (call) async {
+      bankCalls.add(call);
+      return call.method == 'openApp' ? true : null;
+    });
+    messenger.setMockMethodCallHandler(share, (call) async {
+      sharing.add(call.arguments as String);
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(bank, null);
+      messenger.setMockMethodCallHandler(share, null);
+    });
+
+    await _launch(tester, repo);
+    await _saveMeal(tester, [quickMealSelfId, lin], lin);
+    await _show(tester, _key('meal-bank-copy-account'));
+    expect(find.text('822 中國信託 · 末四碼 6789'), findsOneWidget);
+    expect(find.textContaining(account), findsNothing);
+    expect(bankCalls, isEmpty);
+    await _tap(tester, find.widgetWithText(FilledButton, '分享清單'));
+    expect(sharing.single, contains('我 → 小林'));
+    expect(sharing.single, isNot(contains('6789')));
+    expect(sharing.single, isNot(contains(account)));
+    expect(bankCalls, isEmpty);
+
+    await _tap(tester, _key('meal-bank-open'));
+    await _tap(tester, _key('meal-bank-copy-account'));
+    expect(bankCalls.map((call) => (call.method, call.arguments)), [
+      ('openApp', bankChoice.id),
+      ('copyAccount', account),
+    ]);
+    expect(find.textContaining(account), findsNothing);
+    expect((await repo.load()).quickMeals.length, 1);
+    expect((await repo.load()).groups, isEmpty);
+  });
+
   testWidgets('空帳本可直接新增朋友，需選滿兩人與付款人，取消付款人後須重新選擇', (tester) async {
     final repo = MemorySplitRepository();
     await _launch(tester, repo);

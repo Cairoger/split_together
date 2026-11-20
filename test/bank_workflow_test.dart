@@ -77,7 +77,12 @@ void main() {
     messenger.setMockMethodCallHandler(launcher, (call) async {
       calls.add(call);
       return switch (call.method) {
-        'pickApp' => {'id': 'test.example.launchable', 'label': '測試 App'},
+        'listApps' => [
+          {'id': 'test.example.launchable', 'label': '測試 App'},
+          {'id': 'com.chinatrust.mobilebank', 'label': '中國信託行動銀行'},
+        ],
+        'appIcon' => null,
+        'isAppAvailable' => true,
         'openApp' => true,
         'copyAccount' => null,
         _ => fail('Unexpected action ${call.method}'),
@@ -87,10 +92,10 @@ void main() {
     await start(tester, repo, TargetPlatform.android);
     await tapLabel(tester, '設定');
     await tapLabel(tester, '我的轉帳 App');
-    for (final name in ['中國信託行動銀行', '台新行動銀行', '行動郵局']) {
-      expect(find.text(name), findsOneWidget);
-    }
-    await tapLabel(tester, '選擇其他已安裝的 App');
+    expect(find.text('中國信託行動銀行'), findsOneWidget);
+    expect(find.text('台新行動銀行'), findsNothing);
+    expect(find.text('com.chinatrust.mobilebank'), findsNothing);
+    await tapLabel(tester, '測試 App');
     expect((await repo.load()).bankApp?.id, 'test.example.launchable');
     await tapLabel(tester, '首頁');
     await tapLabel(tester, '旅伴');
@@ -117,6 +122,56 @@ void main() {
     expect(calls.last.method, 'openApp');
     expect(calls.last.arguments, 'test.example.launchable');
     expect((await repo.load()).groups.single.repayments, isEmpty);
+  });
+
+  testWidgets('搜尋、識別同名 App、返回或已移除 App 均不變更設定', (tester) async {
+    final repo = MemorySplitRepository();
+    await repo.setBankApp(
+      const BankAppChoice(id: 'com.chinatrust.mobilebank', label: '中國信託行動銀行'),
+    );
+    final calls = <MethodCall>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(launcher, (call) async {
+      calls.add(call);
+      return switch (call.method) {
+        'listApps' => [
+          {'id': 'fixture.wallet', 'label': '錢包'},
+          {'id': 'fixture.wallet.duplicate', 'label': '錢包'},
+          {'id': 'com.chinatrust.mobilebank', 'label': '中國信託行動銀行'},
+        ],
+        'appIcon' => null,
+        'isAppAvailable' => false,
+        _ => fail('Unexpected action ${call.method}'),
+      };
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(launcher, null));
+
+    await start(tester, repo, TargetPlatform.android);
+    await tapLabel(tester, '設定');
+    await tapLabel(tester, '我的轉帳 App');
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.check_circle)).semanticLabel,
+      '已選取',
+    );
+    expect(find.text('常用銀行'), findsOneWidget);
+    expect(find.text('fixture.wallet'), findsOneWidget);
+    expect(find.text('fixture.wallet.duplicate'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'fixture.wallet.duplicate');
+    await tester.pumpAndSettle();
+    expect(find.text('錢包'), findsOneWidget);
+    expect(find.text('fixture.wallet'), findsNothing);
+    expect(find.text('中國信託行動銀行'), findsNothing);
+    await tapLabel(tester, '錢包');
+    expect(find.text('這個 App 已無法開啟，未變更預設選擇。'), findsOneWidget);
+    expect((await repo.load()).bankApp?.id, 'com.chinatrust.mobilebank');
+    expect(calls.where((call) => call.method == 'openApp'), isEmpty);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text("搜尋已安裝的 App"), findsNothing);
+    await tester.pumpAndSettle();
+    expect((await repo.load()).bankApp?.id, 'com.chinatrust.mobilebank');
   });
 
   testWidgets('iOS 常用銀行與自訂捷徑使用各自對應的入口', (tester) async {

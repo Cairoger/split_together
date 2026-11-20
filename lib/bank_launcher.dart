@@ -19,13 +19,33 @@ abstract final class BankLauncher {
     };
   }
 
-  static Future<BankAppChoice?> pickAndroidApp() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
-    final selected = await _channel.invokeMapMethod<String, String>('pickApp');
-    final id = selected?['id'];
-    final label = selected?['label'];
-    if (id == null || label == null) return null;
-    return BankAppChoice(id: id, label: label);
+  static bool get canListAndroidApps =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  static Future<List<BankAppChoice>> listAndroidApps() async {
+    if (!canListAndroidApps) return const [];
+    final entries = await _channel.invokeListMethod<Object?>('listApps');
+    final choices = <String, BankAppChoice>{};
+    for (final entry in entries ?? const []) {
+      if (entry is! Map) continue;
+      final id = entry['id'];
+      final label = entry['label'];
+      if (id is! String || id.isEmpty || label is! String || label.isEmpty) {
+        continue;
+      }
+      choices.putIfAbsent(id, () => BankAppChoice(id: id, label: label));
+    }
+    return choices.values.toList(growable: false);
+  }
+
+  static Future<Uint8List?> androidAppIcon(String id) async {
+    if (!canListAndroidApps) return null;
+    return _channel.invokeMethod<Uint8List>('appIcon', id);
+  }
+
+  static Future<bool> isAndroidAppAvailable(String id) async {
+    if (!canListAndroidApps) return false;
+    return await _channel.invokeMethod<bool>('isAppAvailable', id) ?? false;
   }
 
   static Future<bool> open(BankAppChoice choice) async {

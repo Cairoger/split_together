@@ -1,11 +1,15 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../bank_apps.dart';
+import '../bank_launcher.dart';
 import '../data/repository.dart';
 import '../domain.dart';
 import '../meal_share.dart';
 import '../state.dart';
 import '../ui.dart';
+import 'bank_screen.dart' show BankAppScreen;
+import 'friends_screen.dart' show friendAccountSummary;
 import 'group_screens.dart' show editName;
 
 class QuickMealScreen extends StatefulWidget {
@@ -244,7 +248,7 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
   }
 }
 
-List<Widget> _breakdown(QuickMeal meal) => [
+List<Widget> _breakdown(QuickMeal meal, {bool showBankEntry = false}) => [
   const SectionTitle('每人分攤'),
   Card(
     child: Column(
@@ -265,17 +269,158 @@ List<Widget> _breakdown(QuickMeal meal) => [
     Card(
       child: Column(
         children: [
-          for (final transfer in meal.transfers)
+          for (final transfer in meal.transfers) ...[
             _AmountLine(
               key: ValueKey('meal-transfer-${transfer.fromId}'),
               label:
                   '${meal.people[transfer.fromId]} → ${meal.people[transfer.toId]}',
               amount: transfer.amount,
             ),
+            if (showBankEntry && transfer.fromId == quickMealSelfId)
+              _MealBankActions(
+                friendId: transfer.toId,
+                recipientName: meal.people[transfer.toId]!,
+                amount: transfer.amount,
+              ),
+          ],
         ],
       ),
     ),
 ];
+
+class _MealBankActions extends StatefulWidget {
+  const _MealBankActions({
+    required this.friendId,
+    required this.recipientName,
+    required this.amount,
+  });
+
+  final String friendId;
+  final String recipientName;
+  final int amount;
+
+  @override
+  State<_MealBankActions> createState() => _MealBankActionsState();
+}
+
+class _MealBankActionsState extends State<_MealBankActions> {
+  bool _busy = false;
+  String? _status;
+
+  Future<void> _run(
+    Future<String?> Function() action, {
+    required String onFailure,
+  }) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    String? status;
+    try {
+      status = await action();
+    } catch (_) {
+      status = onFailure;
+    }
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _status = status;
+      });
+    }
+  }
+
+  Future<void> _copy(String friendId) {
+    final repo = AppScope.of(context).repo;
+    return _run(() async {
+      final number = await repo.readFriendAccount(friendId);
+      if (number == null) return '尚未儲存收款帳號。';
+      if (!mounted) return null;
+      await copyAccount(number);
+      return '已複製收款帳號';
+    }, onFailure: '無法複製帳號，請到常用朋友確認收款資料。');
+  }
+
+  Future<void> _launch(BankAppChoice? choice) => _run(() async {
+    if (choice == null) {
+      await openPage<void>(context, const BankAppScreen());
+      return null;
+    }
+    if (!BankLauncher.supportsDirectOpen(choice)) {
+      return await BankLauncher.openOfficialPage(choice)
+          ? null
+          : '無法開啟商店頁面，請手動打開銀行 App。';
+    }
+    if (await BankLauncher.open(choice) || !mounted) return null;
+    if (!bankApps.any((bank) => bank.id == choice.id)) {
+      return '無法開啟所選項目，請在「我的轉帳 App」重新選取。';
+    }
+    final viewStore = await confirmAction(
+      context,
+      '無法開啟${choice.label}',
+      '請確認手機已安裝此 App。也可以前往官方商店頁面查看。',
+      '前往商店',
+    );
+    if (!viewStore || !mounted) return null;
+    return await BankLauncher.openOfficialPage(choice)
+        ? null
+        : '無法開啟商店頁面，請手動打開銀行 App。';
+  }, onFailure: '無法開啟選定項目，請手動打開銀行 App。');
+
+  @override
+  Widget build(BuildContext context) {
+    final data = AppScope.of(context).data;
+    final choice = data.bankApp;
+    final friend = data.friends
+        .where((f) => f.id == widget.friendId)
+        .firstOrNull;
+    final hasAccount = friend?.bankCode != null && friend?.lastFour != null;
+    final launchLabel = choice == null
+        ? '選擇我的轉帳 App'
+        : choice.id.startsWith('ios-shortcut:')
+        ? '執行捷徑：${choice.label}'
+        : BankLauncher.supportsDirectOpen(choice)
+        ? '開啟${choice.label}'
+        : '從 App Store 查看${choice.label}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '你要轉給${widget.recipientName} ${Money.format(widget.amount)}',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          Text(hasAccount ? friendAccountSummary(friend!) : '尚未儲存收款帳號'),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              FilledButton.tonalIcon(
+                key: const ValueKey('meal-bank-open'),
+                onPressed: _busy ? null : () => _launch(choice),
+                icon: const Icon(Icons.open_in_new),
+                label: Text(launchLabel),
+              ),
+              if (hasAccount)
+                OutlinedButton.icon(
+                  key: const ValueKey('meal-bank-copy-account'),
+                  onPressed: _busy ? null : () => _copy(widget.friendId),
+                  icon: const Icon(Icons.copy),
+                  label: const Text('複製收款帳號'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text('只會開啟 App，不會代為轉帳或記錄還款。'),
+          if (_status != null)
+            Semantics(liveRegion: true, child: Text(_status!)),
+        ],
+      ),
+    );
+  }
+}
 
 class _AmountLine extends StatelessWidget {
   const _AmountLine({super.key, required this.label, required this.amount});
@@ -404,7 +549,7 @@ class _MealResultScreen extends StatelessWidget {
               ),
             ],
           ),
-          ..._breakdown(meal),
+          ..._breakdown(meal, showBankEntry: true),
         ],
       ),
     );

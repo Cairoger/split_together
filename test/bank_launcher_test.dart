@@ -17,7 +17,13 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       return switch (call.method) {
-        'pickApp' => {'id': selected.id, 'label': selected.label},
+        'listApps' => [
+          {'id': selected.id, 'label': selected.label},
+          {'id': selected.id, 'label': '重複'},
+          {'id': 'no-label'},
+        ],
+        'isAppAvailable' => true,
+        'appIcon' => Uint8List.fromList([1, 2, 3]),
         'openApp' || 'openOfficialPage' => true,
         'copyAccount' => null,
         _ => throw MissingPluginException(),
@@ -31,10 +37,21 @@ void main() {
 
   test('使用自選 Android App 時只傳送套件 ID；帳號僅在使用者複製時交給剪貼簿', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    final choice = await BankLauncher.pickAndroidApp();
-    expect(choice?.label, selected.label);
-    expect(await BankLauncher.open(choice!), isTrue);
-    expect(calls.map((call) => call.method), ['pickApp', 'openApp']);
+    final choice = (await BankLauncher.listAndroidApps()).single;
+    expect(choice.label, selected.label);
+    expect(await BankLauncher.androidAppIcon(choice.id), [1, 2, 3]);
+    expect(await BankLauncher.isAndroidAppAvailable(choice.id), isTrue);
+    expect(await BankLauncher.open(choice), isTrue);
+    expect(calls.map((call) => call.method), [
+      'listApps',
+      'appIcon',
+      'isAppAvailable',
+      'openApp',
+    ]);
+    expect(
+      calls.skip(1).map((call) => call.arguments),
+      List.filled(3, choice.id),
+    );
     expect(calls.last.arguments, selected.id);
 
     await BankLauncher.copyAccount('000000000000');
@@ -45,7 +62,7 @@ void main() {
   test('iOS 行動郵局提供獨立商店入口；捷徑需由使用者選定', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     const postal = BankAppChoice(id: 'tw.gov.post.mpost', label: '行動郵局');
-    expect(await BankLauncher.pickAndroidApp(), isNull);
+    expect(await BankLauncher.listAndroidApps(), isEmpty);
     expect(await BankLauncher.open(postal), isFalse);
     expect(calls, isEmpty);
     expect(await BankLauncher.openOfficialPage(postal), isTrue);
