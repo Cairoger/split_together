@@ -3,7 +3,6 @@ import 'package:material_ui/material_ui.dart';
 import 'domain.dart';
 
 const appName = 'SplitTogether';
-const appVersion = '1.0.0';
 const groupCategories = ['旅遊', '聚餐', '生活', '其他'];
 
 Color balanceColor(ColorScheme colors, int amount) => switch (amount.sign) {

@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../domain.dart';
 import '../state.dart';
@@ -494,7 +495,7 @@ class _SettingsState extends State<_Settings> {
                 SizedBox(height: 8),
                 Text('帳本儲存在這台裝置，不會自動同步或備份。解除安裝、清除 App 資料或遺失裝置時，記帳資料可能遺失。'),
                 Divider(height: 28),
-                Text('$appName · 版本 $appVersion'),
+                _InstalledAppVersion(),
                 SizedBox(height: 4),
                 Text('還款建議僅供核對，實際轉帳後請手動登記。'),
               ],
@@ -504,4 +505,30 @@ class _SettingsState extends State<_Settings> {
       ],
     );
   }
+}
+
+class _InstalledAppVersion extends StatefulWidget {
+  const _InstalledAppVersion();
+
+  @override
+  State<_InstalledAppVersion> createState() => _InstalledAppVersionState();
+}
+
+class _InstalledAppVersionState extends State<_InstalledAppVersion> {
+  late final _packageInfo = PackageInfo.fromPlatform();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<PackageInfo>(
+    future: _packageInfo,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Text('$appName · 正在讀取版本…');
+      }
+      final version = snapshot.data?.version.trim() ?? '';
+      if (version.isEmpty) return const Text('$appName · 無法取得版本資訊');
+      final build = snapshot.data!.buildNumber.trim();
+      final suffix = build.isEmpty ? '' : '（組建 $build）';
+      return Text('$appName · 版本 $version$suffix');
+    },
+  );
 }
