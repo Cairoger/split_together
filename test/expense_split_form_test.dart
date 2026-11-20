@@ -233,7 +233,7 @@ void main() {
     expect(tester.testTextInput.isVisible, isFalse);
   });
 
-  testWidgets('多人百分比不足顯示尚未分配，105% 隱藏圖表和金額，保留一人可穩定分完尾差', (tester) async {
+  testWidgets('多人百分比不足顯示尚未分配，105% 顯示警示環，保留一人可穩定分完尾差', (tester) async {
     final repo = MemorySplitRepository();
     await repo.createGroup('週末', '生活', ['小安', '小林']);
     final group = (await repo.load()).groups.single;
@@ -270,7 +270,8 @@ void main() {
     await _expectPercent(tester, a, 3000);
     await _expectPercent(tester, b, 2000);
     await _show(tester, find.textContaining('超出 5%').first);
-    expect(_key('percent-donut'), findsNothing);
+    expect(_key('percent-donut'), findsOneWidget);
+    expect(find.text('請從任一人減少共 5%'), findsOneWidget);
     for (final id in sorted) {
       expect(_key('split-share-$id'), findsNothing);
     }
@@ -292,6 +293,105 @@ void main() {
       a: 3000,
       b: 2999,
     });
+  });
+
+  testWidgets('窄螢幕與大字體下，新增及編輯的警示環保留位置，比例修正後恢復分攤', (tester) async {
+    final repo = MemorySplitRepository();
+    await repo.setAppearance(AppAppearance.dark);
+    await repo.createGroup('週末', '生活', ['小安', '小林']);
+    final group = (await repo.load()).groups.single;
+    final [a, b, c] = group.members.map((m) => m.id).toList();
+    await _launch(tester, repo, size: const Size(320, 640), scale: 1.6);
+    await _newExpense(tester);
+    await _mode(tester, 'percent');
+    for (final entry in {a: '50', b: '35', c: '15'}.entries) {
+      await _precise(tester, 'percent-value-${entry.key}', entry.value);
+    }
+    final donut = _key('percent-donut');
+    final card = find.ancestor(of: donut, matching: find.byType(Card)).first;
+    Rect chartBounds() => tester.getRect(donut).shift(-tester.getTopLeft(card));
+    await _show(tester, donut);
+    final initialBounds = chartBounds();
+    expect(
+      tester.renderObject(donut),
+      paints
+        ..arc()
+        ..arc()
+        ..arc(),
+    );
+
+    await _precise(tester, 'percent-value-$c', '25');
+    await _show(tester, donut);
+    expect(chartBounds(), initialBounds);
+    expect(
+      find.descendant(of: donut, matching: find.text('超出 10%')),
+      findsOneWidget,
+    );
+    expect(find.text('請從任一人減少共 10%'), findsOneWidget);
+    expect(
+      tester.renderObject(donut),
+      paints..arc(color: Colors.orange.shade200),
+    );
+    expect(
+      tester.renderObject(donut),
+      isNot(
+        paints
+          ..arc()
+          ..arc(),
+      ),
+    );
+    for (final entry in {a: 5000, b: 3500, c: 2500}.entries) {
+      await _expectPercent(tester, entry.key, entry.value);
+      expect(_key('split-share-${entry.key}'), findsNothing);
+    }
+    expect(await _canSave(tester), isFalse);
+    await _tap(tester, _key('percent-toggle-$c'));
+    final slider = _key('percent-slider-$c');
+    await _show(tester, slider);
+    tester.widget<Slider>(slider).onChanged!(15);
+    await tester.pumpAndSettle();
+    await _show(tester, donut);
+    expect(chartBounds(), initialBounds);
+    expect(find.text('已分配 100%'), findsOneWidget);
+    expect(
+      tester.renderObject(donut),
+      paints
+        ..arc()
+        ..arc()
+        ..arc(),
+    );
+    final shares = {a: 60000, b: 42000, c: 18000};
+    for (final entry in shares.entries) {
+      await _expectShare(tester, entry.key, entry.value);
+    }
+    await _tap(tester, _key('expense-save'));
+    final saved = (await repo.load()).groups.single.expenses.single;
+    expect(saved.shares, shares);
+    expect(saved.shares.values.reduce((a, b) => a + b), saved.amount);
+
+    await _openSaved(tester, '午餐');
+    await _precise(tester, 'percent-value-$c', '15.01');
+    await _show(tester, donut);
+    expect(
+      find.descendant(of: donut, matching: find.text('超出 0.01%')),
+      findsOneWidget,
+    );
+    expect(find.text('請從任一人減少共 0.01%'), findsOneWidget);
+    expect(await _canSave(tester), isFalse);
+    await _precise(tester, 'percent-value-$c', '14.99');
+    await _show(tester, donut);
+    expect(find.text('尚未分配 0.01%'), findsOneWidget);
+    expect(
+      tester.renderObject(donut),
+      paints
+        ..arc()
+        ..arc()
+        ..arc()
+        ..arc(color: Colors.grey.shade600),
+    );
+    expect(await _canSave(tester), isFalse);
+    expect((await repo.load()).groups.single.expenses.single.shares, shares);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('切換分帳方式保留各自草稿，增減參與者不會改寫其他人的比例', (tester) async {

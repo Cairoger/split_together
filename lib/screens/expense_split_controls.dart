@@ -432,21 +432,11 @@ class _PercentSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (total > 10000) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Text(
-          '超出 ${Money.input(total - 10000)}%',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.error,
-          ),
-        ),
-      );
-    }
     final remaining = 10000 - total;
-    final gray = theme.brightness == Brightness.dark
-        ? Colors.grey.shade600
-        : Colors.grey.shade400;
+    final excess = remaining < 0 ? '${Money.input(-remaining)}%' : null;
+    final dark = theme.brightness == Brightness.dark;
+    final gray = dark ? Colors.grey.shade600 : Colors.grey.shade400;
+    final warningRing = dark ? Colors.orange.shade200 : Colors.orange.shade300;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -458,8 +448,12 @@ class _PercentSummary extends StatelessWidget {
               child: CustomPaint(
                 key: const ValueKey('percent-donut'),
                 painter: _DonutPainter([
-                  ...parts,
-                  if (remaining > 0) (value: remaining, color: gray),
+                  if (excess != null)
+                    (value: 10000, color: warningRing)
+                  else ...[
+                    ...parts,
+                    if (remaining > 0) (value: remaining, color: gray),
+                  ],
                 ]),
                 child: Padding(
                   padding: const EdgeInsets.all(23),
@@ -468,9 +462,14 @@ class _PercentSummary extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('帳單總額', style: theme.textTheme.labelMedium),
+                        if (excess == null)
+                          Text('帳單總額', style: theme.textTheme.labelMedium),
                         Text(
-                          amount == null ? '—' : Money.format(amount!),
+                          excess != null
+                              ? '超出 $excess'
+                              : amount == null
+                              ? '—'
+                              : Money.format(amount!),
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
@@ -483,7 +482,9 @@ class _PercentSummary extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          if (remaining > 0)
+          if (excess != null)
+            Text('請從任一人減少共 $excess', textAlign: TextAlign.center)
+          else if (remaining > 0)
             Wrap(
               spacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,

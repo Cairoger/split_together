@@ -2,10 +2,14 @@ import 'package:sqflite/sqflite.dart';
 
 import '../domain.dart';
 
+const ledgerSchemaVersion = 4;
+
 // sqflite runs version callbacks inside its opening transaction. Extend the
 // migration sequence here when adding a version, keeping existing records.
 Future<void> migrateLedger(Database db, int oldVersion, int newVersion) async {
-  if (oldVersion < 0 || newVersion > 3 || oldVersion >= newVersion) {
+  if (oldVersion < 0 ||
+      newVersion > ledgerSchemaVersion ||
+      oldVersion >= newVersion) {
     throw StateError('尚未支援此資料庫版本，請檢查應用程式版本');
   }
   final batch = db.batch();
@@ -13,6 +17,9 @@ Future<void> migrateLedger(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 1) ..._schemaV1,
     if (oldVersion < 2 && newVersion >= 2) ..._schemaV2,
     if (oldVersion < 3 && newVersion >= 3) ..._schemaV3,
+    if (oldVersion < 4 && newVersion >= 4)
+      'ALTER TABLE friends ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0 '
+          'CHECK (is_archived IN (0,1))',
   ]) {
     batch.execute(statement);
   }

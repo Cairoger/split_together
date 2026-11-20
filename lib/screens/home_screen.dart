@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../domain.dart';
 import '../state.dart';
 import '../ui.dart';
+import 'backup_screen.dart';
 import 'bank_screen.dart';
 import 'friends_screen.dart';
 import 'expense_screens.dart';
@@ -470,7 +471,7 @@ class _SettingsState extends State<_Settings> {
               ListTile(
                 leading: const Icon(Icons.contacts_outlined),
                 title: const Text('常用朋友'),
-                subtitle: Text('${c.data.friends.length} 位朋友'),
+                subtitle: Text('${c.data.activeFriends.length} 位朋友'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => openPage<void>(context, const FriendsScreen()),
               ),
@@ -482,6 +483,16 @@ class _SettingsState extends State<_Settings> {
                 onTap: () => openPage<void>(context, const BankAppScreen()),
               ),
             ],
+          ),
+        ),
+        const SectionTitle('帳本資料'),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.cloud_outlined),
+            title: const Text('備份與還原'),
+            subtitle: const Text('使用 Google Drive 手動備份帳本'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openPage<void>(context, const BackupScreen()),
           ),
         ),
         const SectionTitle('關於帳本'),

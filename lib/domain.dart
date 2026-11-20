@@ -52,8 +52,10 @@ class SavedFriend {
     required this.name,
     this.bankCode,
     this.lastFour,
+    this.isArchived = false,
   });
   final String id, name;
+  final bool isArchived;
   final String? bankCode, lastFour;
 }
 
@@ -170,8 +172,11 @@ class AppData {
   final List<Ledger> groups;
   final List<QuickMeal> quickMeals;
 
+  List<SavedFriend> get activeFriends =>
+      friends.where((friend) => !friend.isArchived).toList();
+
   Map<String, String> get quickMealPeople {
-    final sorted = friends.toList()
+    final sorted = activeFriends
       ..sort((a, b) {
         final byName = a.name.compareTo(b.name);
         return byName != 0 ? byName : a.id.compareTo(b.id);

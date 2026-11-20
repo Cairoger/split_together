@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../domain.dart';
 import 'account_cipher.dart';
+import 'ledger_backup.dart';
 import 'repository.dart';
 import 'schema.dart';
 
@@ -34,7 +35,7 @@ class SqliteSplitRepository extends LedgerRepository {
     return driver.openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: ledgerSchemaVersion,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) => migrateLedger(db, 0, version),
         onUpgrade: migrateLedger,
@@ -61,11 +62,6 @@ class SqliteSplitRepository extends LedgerRepository {
     final db = await _database;
     return db.transaction((tx) async {
       final settings = await _settings(tx);
-      final friends = await tx.query(
-        'friends',
-        columns: ['id', 'name', 'bank_code', 'last_four'],
-        orderBy: 'name, id',
-      );
       return AppData(
         defaultName: settings['default_name'] ?? '我',
         appearance: settings['appearance'] == AppAppearance.dark.name
@@ -74,16 +70,97 @@ class SqliteSplitRepository extends LedgerRepository {
         groups: await _loadGroups(tx),
         quickMeals: await _loadQuickMeals(tx),
         bankApp: _decodeBankApp(settings['bank_app']),
-        friends: [
-          for (final row in friends)
-            SavedFriend(
-              id: row['id'] as String,
-              name: row['name'] as String,
-              bankCode: row['bank_code'] as String?,
-              lastFour: row['last_four'] as String?,
-            ),
-        ],
+        friends: await _loadFriends(tx, includeBankDetails: true),
       );
+    });
+  }
+
+  Future<List<SavedFriend>> _loadFriends(
+    DatabaseExecutor tx, {
+    bool includeBankDetails = false,
+  }) async {
+    final friends = await tx.query(
+      'friends',
+      columns: [
+        'id',
+        'name',
+        'is_archived',
+        if (includeBankDetails) ...['bank_code', 'last_four'],
+      ],
+      orderBy: 'name, id',
+    );
+    return [
+      for (final row in friends)
+        SavedFriend(
+          id: row['id'] as String,
+          name: row['name'] as String,
+          isArchived: row['is_archived'] == 1,
+          bankCode: row['bank_code'] as String?,
+          lastFour: row['last_four'] as String?,
+        ),
+    ];
+  }
+
+  @override
+  Future<LedgerBackup> createBackup(DateTime createdAt) async {
+    final db = await _database;
+    final data = await db.transaction(
+      (tx) async => AppData(
+        defaultName: '我',
+        friends: await _loadFriends(tx),
+        groups: await _loadGroups(tx),
+        quickMeals: await _loadQuickMeals(tx),
+      ),
+    );
+    return LedgerBackup.fromData(data, createdAt);
+  }
+
+  Future<bool> _isLedgerEmpty(DatabaseExecutor db) async {
+    // 其餘帳目資料表都有指向群組或聚餐的外鍵。裝置設定不算帳目。
+    final rows = await db.rawQuery('''
+      SELECT NOT (
+        EXISTS(SELECT 1 FROM groups) OR EXISTS(SELECT 1 FROM friends)
+        OR EXISTS(SELECT 1 FROM quick_meals)
+      ) AS empty
+    ''');
+    return rows.single['empty'] == 1;
+  }
+
+  @override
+  Future<bool> isLedgerEmpty() async => _isLedgerEmpty(await _database);
+
+  @override
+  Future<void> restoreBackup(LedgerBackup backup) async {
+    final db = await _database;
+    await db.transaction((tx) async {
+      if (!await _isLedgerEmpty(tx)) {
+        throw const FormatException(nonEmptyLedgerMessage);
+      }
+      final batch = tx.batch();
+      for (final friend in backup.data.friends) {
+        batch.insert('friends', {
+          'id': friend.id,
+          'name': friend.name,
+          'is_archived': friend.isArchived ? 1 : 0,
+        });
+      }
+      for (final group in backup.data.groups) {
+        batch.insert('groups', _groupRow(group));
+        for (final member in group.members) {
+          batch.insert('members', _memberRow(group.id, member));
+        }
+        for (final expense in group.expenses) {
+          batch.insert('expenses', _expenseRow(group.id, expense));
+          _insertExpenseSplits(batch, group.id, expense);
+        }
+        for (final payment in group.repayments) {
+          batch.insert('settlements', _paymentRow(group.id, payment));
+        }
+      }
+      for (final meal in backup.data.quickMeals) {
+        _insertQuickMeal(batch, meal);
+      }
+      await batch.commit(noResult: true);
     });
   }
 
@@ -95,6 +172,28 @@ class SqliteSplitRepository extends LedgerRepository {
     return friend.id;
   }
 
+  Future<void> _updateActiveFriend(
+    String id,
+    Map<String, Object?> values,
+  ) async {
+    final db = await _database;
+    final count = await db.update(
+      'friends',
+      values,
+      where: 'id = ? AND is_archived = 0',
+      whereArgs: [id],
+    );
+    if (count == 0) throw const FormatException('找不到常用朋友');
+  }
+
+  @override
+  Future<void> renameFriend(String id, String name) async =>
+      _updateActiveFriend(id, {'name': validateFriendName(name)});
+
+  @override
+  Future<void> archiveFriend(String id) =>
+      _updateActiveFriend(id, {'is_archived': 1});
+
   @override
   Future<void> saveQuickMeal(QuickMeal meal) async {
     final db = await _database;
@@ -104,24 +203,11 @@ class SqliteSplitRepository extends LedgerRepository {
         prior.single.verifyRetry(meal);
         return;
       }
-      final batch = tx.batch();
-      batch.insert('quick_meals', {
-        'id': meal.id,
-        'created_at': meal.createdAt.microsecondsSinceEpoch,
-        'total_minor': meal.total,
-        'payer_id': meal.payerId,
-      });
-      for (final person in meal.people.entries) {
-        if (meal.needsSavedFriend(person.key)) {
-          await _checkFriend(tx, person.key);
-        }
-        batch.insert('quick_meal_people', {
-          'meal_id': meal.id,
-          'person_id': person.key,
-          'name': person.value,
-          'share_minor': meal.shares[person.key]!,
-        });
+      for (final id in meal.people.keys.where(meal.needsSavedFriend)) {
+        await _checkActiveFriend(tx, id);
       }
+      final batch = tx.batch();
+      _insertQuickMeal(batch, meal);
       await batch.commit(noResult: true);
     });
   }
@@ -291,12 +377,12 @@ class SqliteSplitRepository extends LedgerRepository {
     }
   }
 
-  Future<void> _checkFriend(DatabaseExecutor tx, String? id) async {
+  Future<void> _checkActiveFriend(DatabaseExecutor tx, String? id) async {
     if (id == null) return;
     final rows = await tx.query(
       'friends',
       columns: ['id'],
-      where: 'id = ?',
+      where: 'id = ? AND is_archived = 0',
       whereArgs: [id],
     );
     if (rows.isEmpty) throw const FormatException('找不到常用朋友');
@@ -315,7 +401,7 @@ class SqliteSplitRepository extends LedgerRepository {
       final batch = tx.batch();
       batch.insert('groups', _groupRow(group));
       for (final member in group.members) {
-        await _checkFriend(tx, member.friendId);
+        await _checkActiveFriend(tx, member.friendId);
         batch.insert('members', _memberRow(group.id, member));
       }
       await batch.commit(noResult: true);
@@ -341,7 +427,7 @@ class SqliteSplitRepository extends LedgerRepository {
       for (final member in next.members) {
         final old = members[member.id];
         if (old?.friendId != member.friendId) {
-          await _checkFriend(tx, member.friendId);
+          await _checkActiveFriend(tx, member.friendId);
         }
         if (old == null) {
           batch.insert('members', _memberRow(id, member));
@@ -375,15 +461,7 @@ class SqliteSplitRepository extends LedgerRepository {
             whereArgs: [expense.id],
           );
         }
-        for (final share in expense.shares.entries) {
-          batch.insert('expense_splits', {
-            'group_id': id,
-            'expense_id': expense.id,
-            'member_id': share.key,
-            'amount_minor': share.value,
-            'input_weight': expense.inputs[share.key],
-          });
-        }
+        _insertExpenseSplits(batch, id, expense);
       }
       for (final removed in expenses.keys) {
         batch.delete('expenses', where: 'id = ?', whereArgs: [removed]);
@@ -398,6 +476,35 @@ class SqliteSplitRepository extends LedgerRepository {
         batch.delete('settlements', where: 'id = ?', whereArgs: [removed]);
       }
       await batch.commit(noResult: true);
+    });
+  }
+}
+
+void _insertQuickMeal(Batch batch, QuickMeal meal) {
+  batch.insert('quick_meals', {
+    'id': meal.id,
+    'created_at': meal.createdAt.microsecondsSinceEpoch,
+    'total_minor': meal.total,
+    'payer_id': meal.payerId,
+  });
+  for (final person in meal.people.entries) {
+    batch.insert('quick_meal_people', {
+      'meal_id': meal.id,
+      'person_id': person.key,
+      'name': person.value,
+      'share_minor': meal.shares[person.key]!,
+    });
+  }
+}
+
+void _insertExpenseSplits(Batch batch, String groupId, Expense expense) {
+  for (final share in expense.shares.entries) {
+    batch.insert('expense_splits', {
+      'group_id': groupId,
+      'expense_id': expense.id,
+      'member_id': share.key,
+      'amount_minor': share.value,
+      'input_weight': expense.inputs[share.key],
     });
   }
 }

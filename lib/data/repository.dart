@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import '../domain.dart';
+import 'ledger_backup.dart';
 
 final _random = Random.secure();
 
@@ -9,9 +10,16 @@ String newId() => List.generate(
   (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
 ).join();
 
+const nonEmptyLedgerMessage = '本機已有帳目或常用朋友，只能在空帳本還原。';
+
 abstract interface class SplitRepository {
   Future<AppData> load();
+  Future<LedgerBackup> createBackup(DateTime createdAt);
+  Future<bool> isLedgerEmpty();
+  Future<void> restoreBackup(LedgerBackup backup);
   Future<String> createFriend(String name);
+  Future<void> renameFriend(String id, String name);
+  Future<void> archiveFriend(String id);
   Future<void> saveQuickMeal(QuickMeal meal);
   Future<void> setBankApp(BankAppChoice? choice);
   Future<void> setFriendAccount(
@@ -49,8 +57,10 @@ abstract interface class SplitRepository {
 typedef FriendAccount = ({String code, String number});
 typedef NewFriend = ({String id, String name, FriendAccount? account});
 
+String validateFriendName(String name) => _text(name, '朋友姓名');
+
 NewFriend newSavedFriend(String name) =>
-    (id: newId(), name: _text(name, '朋友姓名'), account: null);
+    (id: newId(), name: validateFriendName(name), account: null);
 
 FriendAccount? validateFriendAccount(String? bankCode, String? accountNumber) {
   if (bankCode == null && accountNumber == null) return null;

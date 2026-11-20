@@ -1,4 +1,5 @@
 import '../domain.dart';
+import 'ledger_backup.dart';
 import 'repository.dart';
 
 class MemorySplitRepository extends LedgerRepository {
@@ -6,6 +7,7 @@ class MemorySplitRepository extends LedgerRepository {
   AppAppearance _appearance = AppAppearance.light;
   final _groups = <String, Ledger>{};
   final _friends = <String, NewFriend>{};
+  final _archivedFriends = <String>{};
   final _quickMeals = <String, QuickMeal>{};
   BankAppChoice? _bankApp;
 
@@ -24,6 +26,7 @@ class MemorySplitRepository extends LedgerRepository {
         SavedFriend(
           id: f.id,
           name: f.name,
+          isArchived: _archivedFriends.contains(f.id),
           bankCode: f.account?.code,
           lastFour: f.account?.number.substring(f.account!.number.length - 4),
         ),
@@ -33,10 +36,55 @@ class MemorySplitRepository extends LedgerRepository {
   );
 
   @override
+  Future<LedgerBackup> createBackup(DateTime createdAt) async =>
+      LedgerBackup.fromData(await load(), createdAt);
+
+  bool get _isEmpty =>
+      _friends.isEmpty && _groups.isEmpty && _quickMeals.isEmpty;
+
+  @override
+  Future<bool> isLedgerEmpty() async => _isEmpty;
+
+  @override
+  Future<void> restoreBackup(LedgerBackup backup) async {
+    // 在同一個同步區段檢查並寫入，不讓其他操作插入這兩步之間。
+    if (!_isEmpty) throw const FormatException(nonEmptyLedgerMessage);
+    final data = backup.data;
+    for (final friend in data.friends) {
+      _friends[friend.id] = (id: friend.id, name: friend.name, account: null);
+      if (friend.isArchived) _archivedFriends.add(friend.id);
+    }
+    for (final group in data.groups) {
+      _groups[group.id] = group;
+    }
+    for (final meal in data.quickMeals) {
+      _quickMeals[meal.id] = meal;
+    }
+  }
+
+  @override
   Future<String> createFriend(String name) async {
     final friend = newSavedFriend(name);
     _friends[friend.id] = friend;
     return friend.id;
+  }
+
+  NewFriend _activeFriend(String id) {
+    if (_archivedFriends.contains(id)) throw const FormatException('找不到常用朋友');
+    return _friend(id);
+  }
+
+  @override
+  Future<void> renameFriend(String id, String name) async {
+    final cleanName = validateFriendName(name);
+    final friend = _activeFriend(id);
+    _friends[id] = (id: id, name: cleanName, account: friend.account);
+  }
+
+  @override
+  Future<void> archiveFriend(String id) async {
+    _activeFriend(id);
+    _archivedFriends.add(id);
   }
 
   @override
@@ -46,10 +94,8 @@ class MemorySplitRepository extends LedgerRepository {
       saved.verifyRetry(meal);
       return;
     }
-    if (meal.people.keys.any(
-      (id) => meal.needsSavedFriend(id) && !_friends.containsKey(id),
-    )) {
-      throw const FormatException('找不到常用朋友');
+    for (final id in meal.people.keys.where(meal.needsSavedFriend)) {
+      _activeFriend(id);
     }
     _quickMeals[meal.id] = meal;
   }
@@ -92,16 +138,24 @@ class MemorySplitRepository extends LedgerRepository {
         throw const FormatException('這筆紀錄屬於其他群組');
       }
     }
-    _commitFriends(next, newFriends);
+    _commitFriends(next, newFriends, previous: group);
     _groups[id] = next;
   }
 
-  void _commitFriends(Ledger group, List<NewFriend> additions) {
-    final ids = {..._friends.keys, ...additions.map((f) => f.id)};
-    if (group.members.any(
-      (m) => m.friendId != null && !ids.contains(m.friendId),
-    )) {
-      throw const FormatException('找不到常用朋友');
+  void _commitFriends(
+    Ledger group,
+    List<NewFriend> additions, {
+    Ledger? previous,
+  }) {
+    final existingLinks = {
+      for (final m in previous?.members ?? const <Member>[]) m.id: m.friendId,
+    };
+    final newIds = additions.map((f) => f.id).toSet();
+    for (final m in group.members) {
+      final id = m.friendId;
+      if (id != null && existingLinks[m.id] != id && !newIds.contains(id)) {
+        _activeFriend(id);
+      }
     }
     for (final friend in additions) {
       _friends[friend.id] = friend;

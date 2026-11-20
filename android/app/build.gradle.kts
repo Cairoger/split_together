@@ -54,6 +54,10 @@ kotlin {
     }
 }
 
+dependencies {
+    implementation("com.google.android.gms:play-services-auth:21.5.0")
+}
+
 flutter {
     source = "../.."
 }

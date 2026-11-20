@@ -18,6 +18,7 @@ import java.text.Collator
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
+    private val driveBackup by lazy { DriveBackupAuth(this) }
     private val appPickerWorker = Executors.newSingleThreadExecutor()
     private val officialPackages = setOf(
         "com.chinatrust.mobilebank", "tw.com.taishinbank.mobile", "tw.gov.post.mpost"
@@ -25,6 +26,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/drive_backup")
+            .setMethodCallHandler(driveBackup::handle)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/bank_launcher")
             .setMethodCallHandler(::handleBankAction)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "split_together/meal_share")
@@ -171,7 +174,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    @Deprecated("Activity result bridge for Google authorization")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (!driveBackup.onActivityResult(requestCode, resultCode, data)) {
+            super.onActivityResult(requestCode, resultCode, data)
+        }
+    }
+
     override fun onDestroy() {
+        driveBackup.close()
         appPickerWorker.shutdownNow()
         super.onDestroy()
     }

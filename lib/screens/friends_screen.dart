@@ -4,6 +4,7 @@ import '../bank_apps.dart';
 import '../domain.dart';
 import '../state.dart';
 import '../ui.dart';
+import 'group_screens.dart' show editName;
 
 String friendAccountSummary(SavedFriend friend) {
   final code = friend.bankCode, tail = friend.lastFour;
@@ -18,30 +19,85 @@ class FriendsScreen extends StatefulWidget {
   State<FriendsScreen> createState() => _FriendsScreenState();
 }
 
+enum _FriendAction { rename, archive }
+
 class _FriendsScreenState extends State<FriendsScreen> {
-  String search = '';
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _editFriendName([SavedFriend? friend]) {
+    final controller = AppScope.of(context);
+    return editName(
+      context,
+      title: friend == null ? '新增常用朋友' : '重新命名',
+      initial: friend?.name ?? '',
+      save: (name) async {
+        if (friend == null) {
+          await controller.change((repo) => repo.createFriend(name));
+          if (mounted && _search.text.isNotEmpty) setState(_search.clear);
+        } else {
+          await controller.change((repo) => repo.renameFriend(friend.id, name));
+        }
+      },
+    );
+  }
+
+  Future<void> _archive(SavedFriend friend, String label) async {
+    final controller = AppScope.of(context);
+    final confirmed = await confirmAction(
+      context,
+      '移出常用名單',
+      '將「$label」移出常用名單？既有聚餐、群組成員及收款資料會保留。',
+      '移出',
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      await controller.change((repo) => repo.archiveFriend(friend.id));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(errorMessage(error))));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final friends = AppScope.of(context).data.friends;
-    final matches = _matchingFriends(friends, search);
+    final data = AppScope.of(context).data;
+    final friends = data.activeFriends;
+    final labels = data.quickMealPeople;
+    final matches = _matchingFriends(friends, _search.text);
+    final add = FilledButton.icon(
+      icon: const Icon(Icons.person_add_outlined),
+      label: const Text('新增常用朋友'),
+      onPressed: () => _editFriendName(),
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('常用朋友')),
       body: PageBody(
         children: [
           if (friends.isEmpty)
-            const EmptyCard(
+            EmptyCard(
               Icons.contacts_outlined,
               '尚無常用朋友',
-              '新增群組成員時勾選「存為常用朋友」，下次分帳就能直接選取。',
+              '加入朋友後，每次聚餐都能從這裡的名單勾選出席者。',
+              action: add,
             )
           else ...[
+            add,
+            const SizedBox(height: 12),
             TextField(
+              controller: _search,
               decoration: const InputDecoration(
                 labelText: '搜尋朋友',
                 prefixIcon: Icon(Icons.search),
               ),
-              onChanged: (v) => setState(() => search = v),
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 12),
             if (matches.isEmpty) const Text('沒有符合的朋友'),
@@ -49,9 +105,28 @@ class _FriendsScreenState extends State<FriendsScreen> {
               Card(
                 child: ListTile(
                   key: ValueKey(friend.id),
-                  title: Text(friend.name),
+                  title: Text(labels[friend.id]!),
                   subtitle: Text(friendAccountSummary(friend)),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: PopupMenuButton<_FriendAction>(
+                    tooltip: '${labels[friend.id]}的名單選項',
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: _FriendAction.rename,
+                        child: Text('重新命名'),
+                      ),
+                      PopupMenuItem(
+                        value: _FriendAction.archive,
+                        child: Text('移出常用名單'),
+                      ),
+                    ],
+                    onSelected: (action) => switch (action) {
+                      _FriendAction.rename => _editFriendName(friend),
+                      _FriendAction.archive => _archive(
+                        friend,
+                        labels[friend.id]!,
+                      ),
+                    },
+                  ),
                   onTap: () => openPage(
                     context,
                     FriendDetailScreen(friendId: friend.id),
@@ -491,7 +566,7 @@ class _MemberSheetState extends State<_MemberSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final friends = AppScope.of(context).data.friends;
+    final friends = AppScope.of(context).data.activeFriends;
     final matches = _matchingFriends(friends, search);
     final choice = friends.where((f) => f.id == selectedId).firstOrNull;
     final submitLabel = linking ? '儲存連結' : '加入成員';

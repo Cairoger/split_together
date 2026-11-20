@@ -43,6 +43,124 @@ void main() {
       });
       tearDown(() => repo.close());
 
+      test('改名與移出名單保留聚餐、既有群組及收款資料', () async {
+        final groupId = await repo.createGroupWithMembers('晚餐', '聚餐', [guest]);
+        final before = await repo.load();
+        final id = before.activeFriends.single.id;
+        final member = before.groups.single.members.singleWhere(
+          (m) => !m.isSelf,
+        );
+        final sameName = await repo.createFriend('  小安  ');
+        final now = DateTime.utc(2026, 11, 20);
+        final meal = QuickMeal(
+          id: '舊聚餐',
+          createdAt: now,
+          total: 10001,
+          payerId: id,
+          people: {quickMealSelfId: '我', id: '乙'},
+        );
+        await repo.saveQuickMeal(meal);
+
+        final self = before.groups.single.self.id;
+        await repo.saveExpense(
+          groupId,
+          Expense(
+            id: '餐費',
+            title: '餐費',
+            amount: 6000,
+            payerId: member.id,
+            method: SplitMethod.equal,
+            category: '餐飲',
+            spentAt: now,
+            note: '',
+            createdAt: now,
+            updatedAt: now,
+            shares: {self: 3000, member.id: 3000},
+            inputs: const {},
+          ),
+        );
+        await repo.addRepayment(
+          groupId,
+          Repayment(
+            id: '還款',
+            fromId: self,
+            toId: member.id,
+            amount: 1500,
+            paidAt: now,
+            note: '',
+            createdAt: now,
+          ),
+        );
+        await expectLater(repo.createFriend('  '), throwsFormatException);
+        await expectLater(repo.renameFriend(id, '  '), throwsFormatException);
+        expect((await repo.load()).quickMealPeople[id], '乙');
+        await repo.renameFriend(id, '  小安  ');
+        final renamed = await repo.load();
+        expect(renamed.activeFriends.map((f) => f.name), everyElement('小安'));
+        expect(
+          renamed.activeFriends.map((f) => f.id),
+          unorderedEquals([id, sameName]),
+        );
+        expect(
+          renamed.quickMealPeople[id],
+          isNot(renamed.quickMealPeople[sameName]),
+        );
+
+        await repo.archiveFriend(id);
+        final data = await repo.load();
+        expect(data.activeFriends.single.id, sameName);
+        expect(data.quickMealPeople, {quickMealSelfId: '我', sameName: '小安'});
+        expect(data.friends.singleWhere((f) => f.id == id).isArchived, isTrue);
+        expect(await repo.readFriendAccount(id), fixtureNumber);
+        final history = data.quickMeals.single;
+        expect(history.id, meal.id);
+        expect(history.people, meal.people);
+        expect(history.payerId, id);
+        expect(history.shares, meal.shares);
+        expect(history.shareText, meal.shareText);
+        final ledger = data.groups.single;
+        expect(ledger.member(member.id).name, '乙');
+        expect(ledger.member(member.id).friendId, id);
+        expect(ledger.member(member.id).isActive, isTrue);
+        expect(ledger.repayments.single.amount, 1500);
+        expect(ledger.expenses.single.shares, {self: 3000, member.id: 3000});
+        expect(BalanceService.balances(ledger), {self: -1500, member.id: 1500});
+        await repo.renameMember(groupId, member.id, '餐友乙');
+        await repo.saveQuickMeal(meal); // 舊餐重試應保留原本的單筆交易。
+        await expectLater(
+          repo.saveQuickMeal(
+            QuickMeal(
+              id: '新聚餐',
+              createdAt: now,
+              total: meal.total,
+              payerId: id,
+              people: meal.people,
+            ),
+          ),
+          throwsFormatException,
+        );
+        await expectLater(
+          repo.createGroupWithMembers('新群組', '聚餐', [
+            MemberDraft(name: '乙', friendId: id),
+          ]),
+          throwsFormatException,
+        );
+        final otherGroup = await repo.createGroup('另一群組', '其他', ['未連結成員']);
+        final otherMember = (await repo.load()).groups
+            .singleWhere((g) => g.id == otherGroup)
+            .members
+            .singleWhere((m) => !m.isSelf);
+        await expectLater(
+          repo.linkMemberFriend(
+            otherGroup,
+            otherMember.id,
+            MemberDraft(name: '乙', friendId: id),
+          ),
+          throwsFormatException,
+        );
+        expect((await repo.load()).quickMeals.single.id, meal.id);
+      });
+
       test('同名不自動連結，明確選定的朋友跨組共用收款資料', () async {
         final firstId = await repo.createGroupWithMembers('第一組', '其他', [guest]);
         final first = (await repo.load()).friends.single;
@@ -146,6 +264,85 @@ void main() {
     });
   }
 
+  test('v3 升級後朋友預設在名單中，重開仍保留封存狀態、收款資料與原餐紀錄', () async {
+    final tmp = await Directory.systemTemp.createTemp('split-friends-v3-');
+    addTearDown(() => tmp.delete(recursive: true));
+    final location = p.join(tmp.path, 'ledger.db');
+    final old = await databaseFactoryFfi.openDatabase(
+      location,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onCreate: (db, version) => migrateLedger(db, 0, version),
+      ),
+    );
+    final encrypted = await cipher.encrypt(
+      'lin',
+      '007',
+      fixtureNumber,
+      canCreateKey: true,
+    );
+    await old.transaction((tx) async {
+      await tx.insert('friends', {
+        'id': 'lin',
+        'name': '小林',
+        'bank_code': '007',
+        'last_four': '6789',
+        'account_cipher': encrypted,
+      });
+      await tx.insert('quick_meals', {
+        'id': 'meal',
+        'created_at': 1000000,
+        'total_minor': 101,
+        'payer_id': 'lin',
+      });
+      for (final (id, name, share) in [
+        (quickMealSelfId, '我', 51),
+        ('lin', '小林', 50),
+      ]) {
+        await tx.insert('quick_meal_people', {
+          'meal_id': 'meal',
+          'person_id': id,
+          'name': name,
+          'share_minor': share,
+        });
+      }
+    });
+    await old.close();
+
+    SqliteSplitRepository open() => SqliteSplitRepository(
+      factory: databaseFactoryFfi,
+      path: location,
+      accountCipher: cipher,
+    );
+    var repo = open();
+    addTearDown(() => repo.close());
+    final upgraded = await repo.load();
+    expect(upgraded.activeFriends.single.name, '小林');
+    expect(upgraded.quickMeals.single.total, 101);
+    await repo.renameFriend('lin', '小林同學');
+    await repo.archiveFriend('lin');
+    await repo.close();
+    repo = open();
+    final restored = await repo.load();
+    expect(restored.friends.single.name, '小林同學');
+    expect(restored.friends.single.isArchived, isTrue);
+    expect(restored.activeFriends, isEmpty);
+    expect(await repo.readFriendAccount('lin'), fixtureNumber);
+    final meal = restored.quickMeals.single;
+    expect(meal.people, {quickMealSelfId: '我', 'lin': '小林'});
+    expect(meal.payerId, 'lin');
+    expect(meal.shares, {quickMealSelfId: 51, 'lin': 50});
+    expect(meal.transfers.single.amount, 51);
+    final db = await databaseFactoryFfi.openDatabase(location);
+    expect(await db.getVersion(), 4);
+    expect(
+      (await db.query('friends')).single['account_cipher'],
+      orderedEquals(encrypted),
+    );
+    expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+  });
+
   test('v1 原地升級；重開保留帳目、遮罩資料、銀行 App 與可解密帳號', () async {
     final tmp = await Directory.systemTemp.createTemp('split-friends-');
     addTearDown(() => tmp.delete(recursive: true));
@@ -226,7 +423,7 @@ void main() {
     expect(data.bankApp?.label, '測試 App');
     expect(await repo.readFriendAccount(id), fixtureNumber);
     final db = await databaseFactoryFfi.openDatabase(location);
-    expect(await db.getVersion(), 3);
+    expect(await db.getVersion(), 4);
     final stored =
         (await db.query('friends')).single['account_cipher'] as Uint8List;
     expect(stored.length, greaterThan(fixtureNumber.length));
