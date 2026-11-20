@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'domain.dart';
 
+export 'domain.dart' show shortDate;
+
 const appName = 'SplitTogether';
 const groupCategories = ['旅遊', '聚餐', '生活', '其他'];
 
@@ -16,11 +18,6 @@ String balanceLabel(int value) => switch (value.compareTo(0)) {
   -1 => '應付 −${Money.format(-value)}',
   _ => '已結清 ${Money.format(0)}',
 };
-
-String shortDate(DateTime date) {
-  final local = date.toLocal();
-  return '${local.year}/${local.month.toString().padLeft(2, '0')}/${local.day.toString().padLeft(2, '0')}';
-}
 
 String errorMessage(Object e) {
   if (e is FormatException) return e.message;

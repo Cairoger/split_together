@@ -210,6 +210,11 @@ class Transfer {
   final int amount;
 }
 
+String shortDate(DateTime date) {
+  final local = date.toLocal();
+  return '${local.year}/${local.month.toString().padLeft(2, '0')}/${local.day.toString().padLeft(2, '0')}';
+}
+
 abstract final class Money {
   static const maxMinor = 9999999999;
   static final _decimal = RegExp(r'^([0-9]+)(?:\.([0-9]{1,2}))?$');

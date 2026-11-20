@@ -11,7 +11,7 @@ import 'package:split_together/data/sqlite_repository.dart';
 import 'package:split_together/domain.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-final date = DateTime.utc(2026, 11, 20, 12);
+final date = DateTime(2026, 11, 12, 0, 30).toUtc();
 
 QuickMeal meal(
   Map<String, String> people,
@@ -40,8 +40,13 @@ void main() {
       receipt.transfers.every((t) => t.toId == 'b' && t.amount == 30000),
       isTrue,
     );
-    expect(receipt.shareText, contains('付款人：小林'));
-    expect(receipt.shareText, contains('我 → 小林　NT\$300'));
+    expect(receipt.shareText, r'''2026/11/12 聚餐分帳
+總額 NT$1,200｜4 人平分（每人 NT$300）
+付款人：小林
+
+我 → 小林　NT$300
+小陳 → 小林　NT$300
+小李 → 小林　NT$300''');
     people.clear();
     expect(receipt.people, hasLength(4));
   });
@@ -54,10 +59,31 @@ void main() {
     expect(first.shares.values.reduce((a, b) => a + b), 100000);
     final tiny = meal(first.people, 'a', 1);
     expect(tiny.transfers, isEmpty);
-    expect(tiny.shareText, contains('本次無須轉帳'));
+    expect(tiny.shareText, r'''2026/11/12 聚餐分帳
+總額 NT$0.01｜3 人平分
+付款人：甲
+
+本次無須轉帳''');
     expect(() => meal({'a': '甲'}, 'a', 100), throwsFormatException);
     expect(() => meal(first.people, '缺席', 100), throwsFormatException);
     expect(() => meal(first.people, 'a', 0), throwsFormatException);
+  });
+
+  test('從紀錄分享尾差時逐筆使用原分攤，不宣稱每人金額相同', () {
+    final receipt = QuickMeal.recorded(
+      id: 'dinner',
+      createdAt: date,
+      total: 100000,
+      people: {'a': '小晴', 'b': '小安', 'c': '小林'},
+      payerId: 'c',
+      shares: {'a': 33333, 'b': 33334, 'c': 33333},
+    );
+    expect(receipt.shareText, r'''2026/11/12 聚餐分帳
+總額 NT$1,000｜3 人平分
+付款人：小林
+
+小安 → 小林　NT$333.34
+小晴 → 小林　NT$333.33''');
   });
 
   for (final sqlite in [false, true]) {

@@ -63,6 +63,35 @@ void main() {
     expect(sent.single.arguments, dinner.shareText);
   });
 
+  testWidgets(
+    'Windows 仍顯示應轉金額並可複製清單，隱藏無法開啟的銀行入口',
+    (tester) async {
+      final dinner = meal('lin', two, 60000);
+      final copied = <String>[];
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      await showPage(
+        tester,
+        MemorySplitRepository(),
+        QuickMealResultScreen(meal: dinner),
+      );
+      expect(find.text(r'你要轉給小林 NT$300').hitTestable(), findsOneWidget);
+      expect(find.byKey(const ValueKey('meal-bank-open')), findsNothing);
+      await tester.tap(find.text('複製清單'));
+      await tester.pumpAndSettle();
+      expect(copied.single, dinner.shareText);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
   testWidgets('我未出席或分到零元時，只顯示這餐不用轉帳', (tester) async {
     final noPayment = [
       meal('lin', {'lin': '小林', 'chen': '小陳'}, 60000),
@@ -108,6 +137,8 @@ void main() {
     await tester.tap(find.text('看範例結果'));
     await tester.pumpAndSettle();
     expect(find.text(r'你要轉給小林 NT$300'), findsOneWidget);
+    expect(find.textContaining('已儲存'), findsNothing);
+    expect(find.textContaining('已付款'), findsNothing);
     final exampleButton = find.widgetWithText(FilledButton, '選擇我的轉帳 App');
     expect(tester.widget<FilledButton>(exampleButton).onPressed, isNull);
     await tester.tap(exampleButton);

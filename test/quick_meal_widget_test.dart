@@ -80,6 +80,28 @@ Future<void> _saveMeal(
   expect(find.text('聚餐分帳結果'), findsOneWidget);
 }
 
+({List<String> sent, List<String> copied}) _captureLists(WidgetTester tester) {
+  const share = MethodChannel('split_together/meal_share');
+  final messenger = tester.binding.defaultBinaryMessenger;
+  final sent = <String>[], copied = <String>[];
+  messenger.setMockMethodCallHandler(share, (call) async {
+    expect(call.method, 'shareText');
+    sent.add(call.arguments as String);
+    return null;
+  });
+  messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    if (call.method == 'Clipboard.setData') {
+      copied.add((call.arguments as Map)['text'] as String);
+    }
+    return null;
+  });
+  addTearDown(() {
+    messenger.setMockMethodCallHandler(share, null);
+    messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+  });
+  return (sent: sent, copied: copied);
+}
+
 void main() {
   testWidgets('新使用者可在首頁直接用臨時參與者完成一餐並從最近聚餐返回', (tester) async {
     final repo = MemorySplitRepository();
@@ -119,7 +141,9 @@ void main() {
     await _show(tester, _key('meal-missing'));
     expect(tester.widget<Text>(_key('meal-missing')).data, '還需要一位付款人。');
     await _tap(tester, guestPayer);
-    await _tap(tester, find.text('看分帳結果'));
+    await _tap(tester, find.text('儲存並看分帳結果'));
+    expect(find.text('已儲存').hitTestable(), findsOneWidget);
+    expect(find.textContaining('已付款'), findsNothing);
     expect(find.text(r'你要轉給小林 NT$300').hitTestable(), findsOneWidget);
     final data = await repo.load();
     expect(data.groups, isEmpty);
@@ -130,8 +154,14 @@ void main() {
     expect(meal.transfers.length, 3);
     await _tap(tester, find.byType(BackButton));
     final recent = _key('meal-history-${meal.id}');
+    await _show(tester, recent);
+    expect(
+      find.descendant(of: recent, matching: find.textContaining('已儲存')),
+      findsOneWidget,
+    );
     await _tap(tester, recent);
     expect(find.text(r'你要轉給小林 NT$300'), findsOneWidget);
+    expect(find.text('已儲存'), findsOneWidget);
     await _tap(tester, find.byType(BackButton));
     await _tap(tester, find.text('開始聚餐分帳'));
     expect(find.text('小林'), findsNothing);
@@ -212,7 +242,8 @@ void main() {
     await _saveMeal(tester, [quickMealSelfId, lin, an], lin);
     final open = _key('meal-bank-open');
     await _show(tester, open);
-    expect(open, findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '選擇我的轉帳 App'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '分享分帳清單'), findsNothing);
     expect(find.text(r'你要轉給小林 NT$300'), findsOneWidget);
     expect(find.text('尚未儲存收款帳號'), findsOneWidget);
     expect(_key('meal-bank-copy-account'), findsNothing);
@@ -227,7 +258,7 @@ void main() {
     await _tap(tester, open);
     await _tap(tester, find.text('中國信託行動銀行'));
     expect(find.text('聚餐分帳結果'), findsOneWidget);
-    expect(find.text('開啟中國信託行動銀行'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '開啟中國信託行動銀行'), findsOneWidget);
     expect(calls.any((call) => call.method == 'openApp'), isFalse);
     await _tap(tester, open);
     expect(
@@ -356,24 +387,7 @@ void main() {
     final qing = await repo.createFriend('小晴');
     const account = '000123456789';
     await repo.setFriendAccount(lin, '822', account);
-    const share = MethodChannel('split_together/meal_share');
-    final messenger = tester.binding.defaultBinaryMessenger;
-    final sent = <String>[], copied = <String>[];
-    messenger.setMockMethodCallHandler(share, (call) async {
-      expect(call.method, 'shareText');
-      sent.add(call.arguments as String);
-      return null;
-    });
-    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.setData') {
-        copied.add((call.arguments as Map)['text'] as String);
-      }
-      return null;
-    });
-    addTearDown(() => messenger.setMockMethodCallHandler(share, null));
-    addTearDown(
-      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
-    );
+    final (:sent, :copied) = _captureLists(tester);
     await _launch(tester, repo);
     for (final id in [quickMealSelfId, lin, an, qing]) {
       await _tap(tester, _attendee(id));
@@ -461,6 +475,47 @@ void main() {
     expect(after.groups, isEmpty);
   });
 
+  testWidgets('從歷史紀錄複製與分享同一份清單，保留餐期及尾差，沒有收款資料或重複儲存', (tester) async {
+    final repo = _CountingMealRepository();
+    final lin = await repo.createFriend('小林');
+    final qing = await repo.createFriend('小晴');
+    await repo.setFriendAccount(lin, '822', '000123456789');
+    final meal = QuickMeal.recorded(
+      id: '過去的一餐',
+      createdAt: DateTime(2024, 3, 17, 12),
+      total: 100000,
+      payerId: lin,
+      people: {quickMealSelfId: '小安', lin: '小林', qing: '小晴'},
+      shares: {quickMealSelfId: 33334, lin: 33333, qing: 33333},
+    );
+    await repo.saveQuickMeal(meal);
+    final (:sent, :copied) = _captureLists(tester);
+    await _launch(tester, repo, openForm: false);
+    await _tap(tester, find.text('全部聚餐紀錄'));
+    final historyRow = _key('meal-history-${meal.id}');
+    expect(
+      find.descendant(of: historyRow, matching: find.textContaining('已儲存')),
+      findsOneWidget,
+    );
+    await _tap(tester, historyRow);
+    expect(find.text('已儲存'), findsOneWidget);
+    expect(find.textContaining('已付款'), findsNothing);
+    expect(sent, isEmpty);
+    expect(copied, isEmpty);
+    await _tap(tester, find.text('複製清單'));
+    await _tap(tester, find.text('分享分帳清單'));
+    const expected = r'''2024/03/17 聚餐分帳
+總額 NT$1,000｜3 人平分
+付款人：小林
+
+小安 → 小林　NT$333.34
+小晴 → 小林　NT$333.33''';
+    expect(copied.single, expected);
+    expect(sent.single, copied.single);
+    expect(repo.saveCalls, 1);
+    expect((await repo.load()).quickMeals.single.id, meal.id);
+  });
+
   testWidgets('窄螢幕與大字級可分別勾選同名朋友，三人平分的尾差與勾選順序無關', (tester) async {
     final repo = MemorySplitRepository();
     final lin1 = await repo.createFriend('小林');
@@ -506,7 +561,9 @@ void main() {
     await _amount(tester, '701.25');
     final save = _key('meal-save');
     await _tap(tester, save);
-    expect(find.textContaining('這次儲存失敗'), findsOneWidget);
+    expect(find.textContaining('再試一次'), findsOneWidget);
+    expect(find.text('聚餐分帳結果'), findsNothing);
+    expect(find.text('已儲存'), findsNothing);
     expect((await repo.load()).quickMeals, isEmpty);
     await _show(tester, _key('meal-amount'));
     expect(
@@ -514,17 +571,34 @@ void main() {
       '701.25',
     );
     expect(tester.widget<ChoiceChip>(_payer(friend)).selected, isTrue);
+    for (final id in [quickMealSelfId, friend]) {
+      expect(tester.widget<FilterChip>(_attendee(id)).selected, isTrue);
+    }
     await _show(tester, save);
     await tester.tap(save);
     await tester.tap(save);
     await tester.pump();
+    expect(find.text('儲存中…'), findsOneWidget);
+    expect(tester.widget<FilledButton>(save).onPressed, isNull);
+    expect((await repo.load()).quickMeals, isEmpty);
     expect(repo.attempts, hasLength(2));
     expect(repo.attempts.toSet(), hasLength(1));
     repo.resume.complete();
     await tester.pumpAndSettle();
     expect((await repo.load()).quickMeals.single.total, 70125);
     expect(find.text('聚餐分帳結果'), findsOneWidget);
+    expect(find.text('已儲存'), findsOneWidget);
   });
+}
+
+class _CountingMealRepository extends MemorySplitRepository {
+  int saveCalls = 0;
+
+  @override
+  Future<void> saveQuickMeal(QuickMeal meal) async {
+    saveCalls++;
+    await super.saveQuickMeal(meal);
+  }
 }
 
 class _RetryRepository extends MemorySplitRepository {
@@ -534,7 +608,7 @@ class _RetryRepository extends MemorySplitRepository {
   @override
   Future<void> saveQuickMeal(QuickMeal meal) async {
     attempts.add(meal.id);
-    if (attempts.length == 1) throw const FormatException('這次儲存失敗，請再試一次');
+    if (attempts.length == 1) throw const FormatException('暫時無法寫入');
     await resume.future;
     await super.saveQuickMeal(meal);
   }

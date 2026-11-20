@@ -123,7 +123,9 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _saveError = errorMessage(error);
+          _saveError = error is FormatException
+              ? '${error.message}\n輸入已保留，請再試一次。'
+              : '這次儲存失敗，輸入已保留。請確認裝置儲存空間後再試一次。';
         });
       }
       return;
@@ -170,10 +172,27 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
             people: attending,
           )
         : null;
-    final submit = FilledButton(
-      key: const ValueKey('meal-save'),
-      onPressed: preview == null || _saving ? null : () => _save(preview),
-      child: Text(_saving ? '儲存中…' : '看分帳結果'),
+    final submit = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_saveError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _saveError!,
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+            ),
+          ),
+        FilledButton(
+          key: const ValueKey('meal-save'),
+          onPressed: preview == null || _saving ? null : () => _save(preview),
+          child: Text(_saving ? '儲存中…' : '儲存並看分帳結果'),
+        ),
+      ],
     );
     return PopScope(
       canPop: !_saving,
@@ -195,7 +214,9 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
             // 極矮的鍵盤可視區讓按鈕一起捲動，保留欄位與提示的操作空間。
             final pinButton =
                 constraints.maxHeight >=
-                120 + MediaQuery.textScalerOf(context).scale(48);
+                120 +
+                    MediaQuery.textScalerOf(context)
+                        .scale(_saveError == null ? 48 : 144);
             return Column(
               children: [
                 Expanded(
@@ -299,14 +320,6 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
                           child: Text(
                             '還需要${missing.join('、')}。',
                             key: const ValueKey('meal-missing'),
-                          ),
-                        ),
-                      if (_saveError != null)
-                        Semantics(
-                          liveRegion: true,
-                          child: Text(
-                            _saveError!,
-                            style: TextStyle(color: theme.colorScheme.error),
                           ),
                         ),
                       if (!pinButton) submit,

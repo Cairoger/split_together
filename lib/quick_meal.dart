@@ -84,9 +84,14 @@ class QuickMeal {
 
   String get shareText {
     final payments = transfers;
+    final firstShare = shares.values.first;
+    final equalShares = shares.values.every((amount) => amount == firstShare);
+    final perPerson = equalShares ? '（每人 ${Money.format(firstShare)}）' : '';
     return [
-      '快速聚餐｜${Money.format(total)}',
+      '${shortDate(createdAt)} 聚餐分帳',
+      '總額 ${Money.format(total)}｜${people.length} 人平分$perPerson',
       '付款人：${people[payerId]}',
+      '',
       for (final t in payments)
         '${people[t.fromId]} → ${people[t.toId]}　${Money.format(t.amount)}',
       if (payments.isEmpty) '本次無須轉帳',

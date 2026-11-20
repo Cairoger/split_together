@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -96,6 +97,10 @@ class _PersonalSummary extends StatelessWidget {
     final selfPaid = meal.payerId == quickMealSelfId;
     final owed = selfPaid ? meal.total - selfShare : 0;
     final owes = !selfPaid && selfShare > 0;
+    final hasBankEntry =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
     final title = owes
         ? '你要轉給$payer ${Money.format(selfShare)}'
         : owed > 0
@@ -108,6 +113,15 @@ class _PersonalSummary extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (!example) ...[
+              Text(
+                '已儲存',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
             Text(
               title,
               key: const ValueKey('meal-personal-summary'),
@@ -123,7 +137,7 @@ class _PersonalSummary extends StatelessWidget {
                 color: theme.colorScheme.onPrimaryContainer,
               ),
             ),
-            if (owes) ...[
+            if (owes && (example || hasBankEntry)) ...[
               const SizedBox(height: 16),
               if (example) ...[
                 FilledButton.icon(
@@ -380,7 +394,7 @@ class QuickMealHistoryTile extends StatelessWidget {
       key: ValueKey('meal-history-${meal.id}'),
       title: Text('${Money.format(meal.total)} · ${meal.people.length} 人平分'),
       subtitle: Text(
-        '${_mealDate(meal.createdAt)}\n${meal.people[meal.payerId]} 先付',
+        '${_mealDate(meal.createdAt)}\n${meal.people[meal.payerId]} 先付 · 已儲存',
       ),
       trailing: const Icon(Icons.chevron_right),
       onTap: () => openPage<void>(context, QuickMealResultScreen(meal: meal)),
