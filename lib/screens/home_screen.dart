@@ -96,19 +96,11 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.restaurant_outlined),
               label: const Text('開始聚餐分帳'),
             ),
-            if (data.quickMeals.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text('不用建群組，也能先算這一餐。', textAlign: TextAlign.center),
+            if (!data.hasSeenExampleResult)
+              const _ExampleEntry(
+                title: '用範例試一次',
+                subtitle: r'兩人平分 NT$600，不會留下紀錄',
               ),
-            Center(
-              child: TextButton(
-                onPressed: () =>
-                    openPage<void>(context, const QuickMealExampleScreen()),
-                child: const Text('用範例試一次'),
-              ),
-            ),
-            const SizedBox(height: 8),
             Wrap(
               alignment: WrapAlignment.spaceBetween,
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -126,11 +118,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            if (data.quickMeals.isEmpty)
+            if (data.quickMeals.isEmpty) ...[
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text('還沒有聚餐紀錄'),
               ),
+              const Text('不用建群組，也能先算這一餐。', textAlign: TextAlign.center),
+            ],
             for (final meal in data.quickMeals.take(3))
               QuickMealHistoryTile(meal: meal),
             const SectionTitle('群組帳本'),
@@ -252,6 +246,25 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+class _ExampleEntry extends StatelessWidget {
+  const _ExampleEntry({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: ListTile(
+      leading: const Icon(Icons.school_outlined),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => openPage<void>(context, const QuickMealExampleScreen()),
+    ),
+  );
 }
 
 class _Summary extends StatelessWidget {
@@ -495,6 +508,8 @@ class _SettingsState extends State<_Settings> {
             onTap: () => openPage<void>(context, const BackupScreen()),
           ),
         ),
+        const SectionTitle('使用說明'),
+        const _ExampleEntry(title: '重看分帳教學', subtitle: '查看兩人平分的範例'),
         const SectionTitle('關於帳本'),
         const Card(
           child: Padding(

@@ -5,6 +5,7 @@ import 'repository.dart';
 class MemorySplitRepository extends LedgerRepository {
   String _name = '我';
   AppAppearance _appearance = AppAppearance.light;
+  bool _hasSeenExampleResult = false;
   final _groups = <String, Ledger>{};
   final _friends = <String, NewFriend>{};
   final _archivedFriends = <String>{};
@@ -15,6 +16,7 @@ class MemorySplitRepository extends LedgerRepository {
   Future<AppData> load() async => AppData(
     defaultName: _name,
     appearance: _appearance,
+    hasSeenExampleResult: _hasSeenExampleResult,
     bankApp: _bankApp,
     quickMeals: _quickMeals.values.toList()
       ..sort((a, b) {
@@ -108,6 +110,11 @@ class MemorySplitRepository extends LedgerRepository {
   @override
   Future<void> setAppearance(AppAppearance value) async {
     _appearance = value;
+  }
+
+  @override
+  Future<void> markExampleResultSeen() async {
+    _hasSeenExampleResult = true;
   }
 
   @override

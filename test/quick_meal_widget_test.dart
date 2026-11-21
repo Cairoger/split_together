@@ -113,6 +113,7 @@ void main() {
     expect(find.text('不用建群組，也能先算這一餐。'), findsOneWidget);
     await _tap(tester, find.text('開始聚餐分帳'));
     final amount = _key('meal-amount');
+    expect(find.text('帶入上次出席者'), findsNothing);
     expect(
       tester.getTopLeft(amount).dy,
       lessThan(tester.getTopLeft(_attendee(quickMealSelfId)).dy),
@@ -217,6 +218,148 @@ void main() {
     );
     expect(friends.any((chip) => chip.selected), isFalse);
     expect(find.byType(ChoiceChip), findsNothing);
+  });
+
+  testWidgets('最近一餐全是封存朋友和臨時參與者，不會回頭帶入更早的一餐', (tester) async {
+    final repo = MemorySplitRepository();
+    final archived = await repo.createFriend('前同事');
+    final other = await repo.createFriend('前同事');
+    await repo.saveQuickMeal(
+      QuickMeal(
+        id: 'recent',
+        createdAt: DateTime.utc(2026, 3),
+        total: 60000,
+        payerId: archived,
+        people: {archived: '前同事', quickMealGuestId('recent', 1): '我'},
+      ),
+    );
+    await repo.archiveFriend(archived);
+    await repo.saveQuickMeal(
+      QuickMeal(
+        id: 'older',
+        createdAt: DateTime.utc(2026, 2),
+        total: 80000,
+        payerId: other,
+        people: {quickMealSelfId: '我', other: '前同事'},
+      ),
+    );
+    await _launch(tester, repo);
+    expect(find.text('帶入上次出席者'), findsNothing);
+    expect(tester.widget<FilterChip>(_attendee(other)).selected, isFalse);
+  });
+
+  testWidgets('只帶入最近一餐中仍可用的 ID，略過無效出席者並保持金額與付款人空白', (tester) async {
+    final repo = MemorySplitRepository();
+    final lin = await repo.createFriend('小林');
+    final namesake = await repo.createFriend('小林');
+    final archived = await repo.createFriend('小秦');
+    final guest = quickMealGuestId('recent', 1);
+    await repo.saveQuickMeal(
+      QuickMeal(
+        id: 'older',
+        createdAt: DateTime.utc(2026, 2),
+        total: 90000,
+        payerId: namesake,
+        people: {quickMealSelfId: '我', namesake: '小林'},
+      ),
+    );
+    await repo.saveQuickMeal(
+      QuickMeal(
+        id: 'recent',
+        createdAt: DateTime.utc(2026, 3),
+        total: 40000,
+        payerId: lin,
+        people: {
+          quickMealSelfId: '舊稱呼',
+          lin: '小林',
+          archived: '小秦',
+          guest: '臨時小林',
+        },
+      ),
+    );
+    await repo.archiveFriend(archived);
+    await _launch(tester, repo, size: const Size(320, 700), scale: 1.6);
+    final repeat = find.text('帶入上次出席者');
+    final heading = find.text('今天有哪些人');
+    await _show(tester, heading);
+    expect(
+      tester.getTopLeft(repeat).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(heading).dy),
+    );
+    expect(
+      tester
+          .widgetList<FilterChip>(find.byType(FilterChip))
+          .where((c) => c.selected),
+      isEmpty,
+    );
+    await _tap(tester, repeat);
+    expect(find.textContaining('已新增 2 位出席者'), findsOneWidget);
+    expect(find.textContaining('手動補上'), findsOneWidget);
+    expect(
+      tester.widget<FilterChip>(_attendee(quickMealSelfId)).selected,
+      isTrue,
+    );
+    expect(tester.widget<FilterChip>(_attendee(lin)).selected, isTrue);
+    expect(tester.widget<FilterChip>(_attendee(namesake)).selected, isFalse);
+    expect(_attendee(archived), findsNothing);
+    expect(_attendee(guest), findsNothing);
+    await _show(tester, _payer(lin));
+    expect(
+      tester
+          .widgetList<ChoiceChip>(find.byType(ChoiceChip))
+          .where((c) => c.selected),
+      isEmpty,
+    );
+    await _show(tester, _key('meal-amount'));
+    expect(
+      tester.widget<TextField>(_key('meal-amount')).controller!.text,
+      isEmpty,
+    );
+    await _tap(tester, _attendee(lin));
+    expect(tester.widget<FilterChip>(_attendee(lin)).selected, isFalse);
+    expect(repeat, findsNothing);
+    expect((await repo.load()).quickMeals, hasLength(2));
+    await _tap(tester, find.byType(BackButton));
+    await _tap(tester, find.text('開始聚餐分帳'));
+    expect(repeat, findsOneWidget);
+    expect(tester.widget<FilterChip>(_attendee(lin)).selected, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('帶入時保留手動勾選、金額和本餐付款人，重疊的人只算一次', (tester) async {
+    final repo = MemorySplitRepository();
+    final previousPayer = await repo.createFriend('小林');
+    final thisPayer = await repo.createFriend('小方');
+    await repo.saveQuickMeal(
+      QuickMeal(
+        id: 'recent',
+        createdAt: DateTime.utc(2026, 3),
+        total: 60000,
+        payerId: previousPayer,
+        people: {quickMealSelfId: '我', previousPayer: '小林'},
+      ),
+    );
+    await _launch(tester, repo);
+    await _amount(tester, '193.45');
+    await _tap(tester, _attendee(quickMealSelfId));
+    await _tap(tester, _attendee(thisPayer));
+    await _tap(tester, _payer(thisPayer));
+    await _tap(tester, find.text('帶入上次出席者'));
+    expect(find.textContaining('已新增 1 位出席者'), findsOneWidget);
+    expect(find.textContaining('手動補上'), findsNothing);
+    expect(
+      tester.widget<TextField>(_key('meal-amount')).controller!.text,
+      '193.45',
+    );
+    for (final id in [quickMealSelfId, previousPayer, thisPayer]) {
+      expect(tester.widget<FilterChip>(_attendee(id)).selected, isTrue);
+      expect(tester.widget<ChoiceChip>(_payer(id)).selected, id == thisPayer);
+    }
+    expect(find.byType(ChoiceChip), findsNWidgets(3));
+    await _tap(tester, _attendee(thisPayer));
+    expect(_payer(thisPayer), findsNothing);
+    expect(find.text('原付款人已取消出席，請重新選擇付款人。'), findsOneWidget);
+    expect(await _canSave(tester), isFalse);
   });
 
   testWidgets('快速聚餐只有本人應付時顯示轉帳入口，設定或取消後返回同一餐', (tester) async {

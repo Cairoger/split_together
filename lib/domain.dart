@@ -161,12 +161,14 @@ class AppData {
     required this.defaultName,
     required this.groups,
     this.appearance = AppAppearance.light,
+    this.hasSeenExampleResult = false,
     this.friends = const [],
     this.bankApp,
     this.quickMeals = const [],
   });
   final String defaultName;
   final AppAppearance appearance;
+  final bool hasSeenExampleResult;
   final List<SavedFriend> friends;
   final BankAppChoice? bankApp;
   final List<Ledger> groups;

@@ -64,6 +64,7 @@ class SqliteSplitRepository extends LedgerRepository {
       final settings = await _settings(tx);
       return AppData(
         defaultName: settings['default_name'] ?? '我',
+        hasSeenExampleResult: settings['example_result_seen'] == 'true',
         appearance: settings['appearance'] == AppAppearance.dark.name
             ? AppAppearance.dark
             : AppAppearance.light,
@@ -263,6 +264,10 @@ class SqliteSplitRepository extends LedgerRepository {
   @override
   Future<void> setAppearance(AppAppearance value) =>
       _writeSetting('appearance', value.name);
+
+  @override
+  Future<void> markExampleResultSeen() =>
+      _writeSetting('example_result_seen', 'true');
 
   Future<void> _writeSetting(String key, String value) async {
     final db = await _database;

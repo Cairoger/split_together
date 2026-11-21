@@ -125,6 +125,19 @@ void main() {
         }
       });
 
+      test('看過範例結果的狀態會保留在本機，教學設定不會寫入帳本備份', () async {
+        final before = await (await source.createBackup(_date)).encode();
+        expect((await source.load()).hasSeenExampleResult, isFalse);
+        await source.markExampleResultSeen();
+        await source.close();
+        expect((await source.load()).hasSeenExampleResult, isTrue);
+        expect(await source.isLedgerEmpty(), isTrue);
+        final after = await (await source.createBackup(_date)).encode();
+        expect(after, orderedEquals(before));
+        await target.restoreBackup(await LedgerBackup.decode(after));
+        expect((await target.load()).hasSeenExampleResult, isFalse);
+      });
+
       test('匯出後還原保留歷史、分攤與還款，只保留目的裝置的設定', () async {
         await _populate(source);
         final before = await source.load();
@@ -135,6 +148,7 @@ void main() {
 
         final backup = await LedgerBackup.decode(bytes);
         await target.setAppearance(AppAppearance.dark);
+        await target.markExampleResultSeen();
         await target.setDefaultName('新手機');
         await target.setBankApp(
           const BankAppChoice(id: 'test.target', label: '本機選項'),
@@ -146,6 +160,7 @@ void main() {
         final after = await target.load();
         expect(after.defaultName, '新手機');
         expect(after.appearance, AppAppearance.dark);
+        expect(after.hasSeenExampleResult, isTrue);
         expect(after.bankApp?.id, 'test.target');
         expect(after.friends.single.id, before.friends.single.id);
         expect(after.friends.single.isArchived, isTrue);

@@ -41,6 +41,7 @@ abstract interface class SplitRepository {
   );
   Future<void> setDefaultName(String name);
   Future<void> setAppearance(AppAppearance value);
+  Future<void> markExampleResultSeen();
   Future<String> createGroup(String name, String category, List<String> others);
   Future<void> editGroup(String groupId, String name, String category);
   Future<void> setArchived(String groupId, bool archived);

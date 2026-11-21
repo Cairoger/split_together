@@ -402,9 +402,15 @@ class QuickMealHistoryTile extends StatelessWidget {
   );
 }
 
-class QuickMealExampleScreen extends StatelessWidget {
+class QuickMealExampleScreen extends StatefulWidget {
   const QuickMealExampleScreen({super.key, this.showResult = false});
   final bool showResult;
+
+  @override
+  State<QuickMealExampleScreen> createState() => _QuickMealExampleScreenState();
+}
+
+class _QuickMealExampleScreenState extends State<QuickMealExampleScreen> {
   static final _example = QuickMeal(
     id: 'example',
     createdAt: DateTime.utc(2000),
@@ -412,6 +418,29 @@ class QuickMealExampleScreen extends StatelessWidget {
     payerId: 'example-lin',
     people: const {quickMealSelfId: '我', 'example-lin': '小林'},
   );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.showResult) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _recordViewedResult());
+    }
+  }
+
+  Future<void> _recordViewedResult() async {
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+    final controller = AppScope.of(context);
+    if (controller.data.hasSeenExampleResult) return;
+    try {
+      await controller.change((repo) => repo.markExampleResultSeen());
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('無法儲存教學進度，下次仍會顯示範例。')),
+        );
+      }
+    }
+  }
 
   void _start(BuildContext context) {
     Navigator.of(context).pushReplacement<void, void>(
@@ -424,7 +453,7 @@ class QuickMealExampleScreen extends StatelessWidget {
     appBar: AppBar(title: const Text('用範例試一次')),
     body: PageBody(
       children: [
-        if (!showResult) ...[
+        if (!widget.showResult) ...[
           const SectionTitle('這一餐怎麼分？'),
           Card(
             child: Column(

@@ -22,6 +22,7 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
   final _amount = TextEditingController();
   String? _payerId;
   String? _saveError;
+  String? _lastAttendeesNotice;
   bool _payerWasRemoved = false;
   bool _editedAmount = false;
   bool _saving = false;
@@ -32,10 +33,12 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
     super.dispose();
   }
 
-  Map<String, String> _choices(AppData data) {
-    final friends = data.quickMealPeople;
+  Map<String, String> _choices(
+    Map<String, String> friends,
+    List<QuickMeal> history,
+  ) {
     final ids = <String>{quickMealSelfId};
-    for (final meal in data.quickMeals) {
+    for (final meal in history) {
       ids.addAll(meal.people.keys.where(friends.containsKey));
       if (ids.length == friends.length) break;
     }
@@ -55,6 +58,19 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
       choices[guest.key] = label;
     }
     return choices;
+  }
+
+  void _addLastAttendees(List<String> ids, int skipped) {
+    if (_saving || _lastAttendeesNotice != null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      final before = _attendees.length;
+      _attendees.addAll(ids);
+      final added = _attendees.length - before;
+      final note = skipped == 0 ? '' : '略過 $skipped 位，可手動補上。';
+      _lastAttendeesNotice = '已新增 $added 位出席者。$note';
+      _saveError = null;
+    });
   }
 
   void _selectAttendee(String id, bool selected) {
@@ -140,7 +156,12 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final people = _choices(AppScope.of(context).data);
+    final data = AppScope.of(context).data;
+    final savedPeople = data.quickMealPeople;
+    final people = _choices(savedPeople, data.quickMeals);
+    final lastIds =
+        data.quickMeals.firstOrNull?.people.keys ?? const <String>[];
+    final reusableIds = lastIds.where(savedPeople.containsKey).toList();
     final attending = {
       for (final person in people.entries)
         if (_attendees.contains(person.key)) person.key: person.value,
@@ -246,7 +267,33 @@ class _QuickMealScreenState extends State<QuickMealScreen> {
                           _saveError = null;
                         }),
                       ),
-                      const SectionTitle('今天有哪些人'),
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        children: [
+                          const SectionTitle('今天有哪些人'),
+                          if (_lastAttendeesNotice == null &&
+                              reusableIds.isNotEmpty)
+                            TextButton(
+                              onPressed: _saving
+                                  ? null
+                                  : () => _addLastAttendees(
+                                      reusableIds,
+                                      lastIds.length - reusableIds.length,
+                                    ),
+                              child: const Text('帶入上次出席者'),
+                            ),
+                        ],
+                      ),
+                      if (_lastAttendeesNotice != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(_lastAttendeesNotice!),
+                          ),
+                        ),
                       Wrap(
                         spacing: 8,
                         runSpacing: 4,
