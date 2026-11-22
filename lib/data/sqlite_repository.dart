@@ -208,9 +208,24 @@ class SqliteSplitRepository extends LedgerRepository {
         await _checkActiveFriend(tx, id);
       }
       final batch = tx.batch();
-      _insertQuickMeal(batch, meal);
+      _insertQuickMeal(batch, meal.withPersonalExpenseRecorded(false));
       await batch.commit(noResult: true);
     });
+  }
+
+  @override
+  Future<void> setQuickMealPersonalExpense(String mealId, bool recorded) async {
+    final db = await _database;
+    final updated = await db.update(
+      'quick_meals',
+      {'recorded_as_personal_expense': recorded ? 1 : 0},
+      where: recorded
+          ? 'id = ? AND EXISTS (SELECT 1 FROM quick_meal_people '
+                'WHERE meal_id = quick_meals.id AND person_id = ? AND share_minor > 0)'
+          : 'id = ?',
+      whereArgs: [mealId, if (recorded) quickMealSelfId],
+    );
+    if (updated == 0) throw const FormatException('找不到聚餐紀錄或可記入的本人分攤金額');
   }
 
   Future<List<QuickMeal>> _loadQuickMeals(
@@ -249,6 +264,7 @@ class SqliteSplitRepository extends LedgerRepository {
     ),
     total: row['total_minor'] as int,
     payerId: row['payer_id'] as String,
+    recordedAsPersonalExpense: row['recorded_as_personal_expense'] == 1,
     people: {
       for (final m in members) m['person_id'] as String: m['name'] as String,
     },
@@ -491,6 +507,7 @@ void _insertQuickMeal(Batch batch, QuickMeal meal) {
     'created_at': meal.createdAt.microsecondsSinceEpoch,
     'total_minor': meal.total,
     'payer_id': meal.payerId,
+    'recorded_as_personal_expense': meal.recordedAsPersonalExpense ? 1 : 0,
   });
   for (final person in meal.people.entries) {
     batch.insert('quick_meal_people', {

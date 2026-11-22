@@ -36,6 +36,7 @@ class QuickMeal {
     required this.payerId,
     required Map<String, String> people,
     required Map<String, int> shares,
+    this.recordedAsPersonalExpense = false,
   }) : createdAt = createdAt.toUtc(),
        people = Map.unmodifiable(people),
        shares = Map.unmodifiable(shares) {
@@ -61,6 +62,9 @@ class QuickMeal {
         shares.values.fold(0, (a, b) => a + b) != total) {
       throw const FormatException('分攤金額與聚餐帳單不符');
     }
+    if (recordedAsPersonalExpense && selfShare <= 0) {
+      throw const FormatException('這餐沒有可記入的本人分攤金額');
+    }
   }
 
   final String id, payerId;
@@ -68,6 +72,22 @@ class QuickMeal {
   final int total;
   final Map<String, String> people;
   final Map<String, int> shares;
+  final bool recordedAsPersonalExpense;
+
+  int get selfShare => shares[quickMealSelfId] ?? 0;
+
+  QuickMeal withPersonalExpenseRecorded(bool recorded) {
+    if (recorded == recordedAsPersonalExpense) return this;
+    return QuickMeal.recorded(
+      id: id,
+      createdAt: createdAt,
+      total: total,
+      payerId: payerId,
+      people: people,
+      shares: shares,
+      recordedAsPersonalExpense: recorded,
+    );
+  }
 
   // 臨時參與者只屬於當餐；其他餐的編號不能當作這餐的臨時出席者。
   bool needsSavedFriend(String personId) {

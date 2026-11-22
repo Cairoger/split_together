@@ -335,7 +335,7 @@ void main() {
     expect(meal.shares, {quickMealSelfId: 51, 'lin': 50});
     expect(meal.transfers.single.amount, 51);
     final db = await databaseFactoryFfi.openDatabase(location);
-    expect(await db.getVersion(), 4);
+    expect(await db.getVersion(), ledgerSchemaVersion);
     expect(
       (await db.query('friends')).single['account_cipher'],
       orderedEquals(encrypted),
@@ -423,7 +423,7 @@ void main() {
     expect(data.bankApp?.label, '測試 App');
     expect(await repo.readFriendAccount(id), fixtureNumber);
     final db = await databaseFactoryFfi.openDatabase(location);
-    expect(await db.getVersion(), 4);
+    expect(await db.getVersion(), ledgerSchemaVersion);
     final stored =
         (await db.query('friends')).single['account_cipher'] as Uint8List;
     expect(stored.length, greaterThan(fixtureNumber.length));

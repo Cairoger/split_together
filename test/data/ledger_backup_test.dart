@@ -121,6 +121,19 @@ void main() {
   test('白名單排除銀行欄位、末四碼及裝置設定，保留封存朋友及同名不同 ID', () async {
     final bytes = await backup.encode();
     final json = jsonDecode(utf8.decode(bytes));
+    expect(json['version'], 2);
+    expect(
+      json['data']['quickMeals'][0].keys,
+      unorderedEquals([
+        'id',
+        'createdAt',
+        'totalMinor',
+        'payerId',
+        'people',
+        'shares',
+        'recordedAsPersonalExpense',
+      ]),
+    );
     expect(
       json['data'].keys,
       unorderedEquals(['friends', 'groups', 'quickMeals', 'currency']),
@@ -183,14 +196,14 @@ void main() {
     await expectLater(LedgerBackup.decode([255, 32]), throwsFormatException);
     for (final (key, value) in [
       ('sha256', 'bad'),
-      ('version', 2),
+      ('version', 3),
       ('version', 1.0),
       ('format', ''),
     ]) {
       final bytes = await editDocument(
         backup.encode(),
         (doc) => doc[key] = value,
-        updateChecksum: false,
+        updateChecksum: key != 'sha256',
       );
       await expectLater(LedgerBackup.decode(bytes), throwsFormatException);
     }
@@ -213,6 +226,21 @@ void main() {
       (d) => d['data']['friends'].removeAt(0),
       (d) => d['data']['quickMeals'][0]['people'].remove('f'),
       (d) => d['data']['quickMeals'][0]['id'] = 'different-meal',
+      (d) => d['version'] = 1, // v1 不允許 v2 的記帳欄位。
+      (d) => d['data']['quickMeals'][0].remove('recordedAsPersonalExpense'),
+      (d) => d['data']['quickMeals'][0]['recordedAsPersonalExpense'] = 1,
+      (d) {
+        final meal = d['data']['quickMeals'][0];
+        meal['recordedAsPersonalExpense'] = true;
+        meal['totalMinor'] = 1;
+        meal['shares'] = {quickMealSelfId: 0, 'f': 1, '@guest:meal:1': 0};
+      },
+      (d) {
+        final meal = d['data']['quickMeals'][0];
+        meal['recordedAsPersonalExpense'] = true;
+        meal['people'].remove(quickMealSelfId);
+        meal['shares'] = {'f': 50, '@guest:meal:1': 50};
+      },
     ];
     for (final corrupt in corruptions) {
       final bytes = await editDocument(backup.encode(), corrupt);

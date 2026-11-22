@@ -99,7 +99,14 @@ class MemorySplitRepository extends LedgerRepository {
     for (final id in meal.people.keys.where(meal.needsSavedFriend)) {
       _activeFriend(id);
     }
-    _quickMeals[meal.id] = meal;
+    _quickMeals[meal.id] = meal.withPersonalExpenseRecorded(false);
+  }
+
+  @override
+  Future<void> setQuickMealPersonalExpense(String mealId, bool recorded) async {
+    final meal = _quickMeals[mealId];
+    if (meal == null) throw const FormatException('找不到這筆聚餐紀錄');
+    _quickMeals[mealId] = meal.withPersonalExpenseRecorded(recorded);
   }
 
   @override

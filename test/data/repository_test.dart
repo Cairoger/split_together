@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:split_together/data/memory_repository.dart';
 import 'package:split_together/data/repository.dart';
+import 'package:split_together/data/schema.dart';
 import 'package:split_together/data/sqlite_repository.dart';
 import 'package:split_together/domain.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -96,6 +97,29 @@ void main() {
           expect(group.repayments.single.id, 'r');
           expect(BalanceService.balances(group)[self], 2000);
         }
+      });
+
+      test('群組消費與收到還款只影響群組餘額，已記入的聚餐支出維持原份額', () async {
+        final meal = QuickMeal(
+          id: 'dinner',
+          createdAt: _date,
+          total: 60000,
+          payerId: quickMealSelfId,
+          people: {quickMealSelfId: '我', quickMealGuestId('dinner', 1): '小林'},
+        );
+        await repo.saveQuickMeal(meal);
+        await repo.saveExpense(id, _expense('e', self, guest, 3000));
+        final before = (await repo.load()).personalExpenses(_date);
+        expect(before.meals, isEmpty);
+        expect(before.monthTotal, 0);
+
+        await repo.setQuickMealPersonalExpense(meal.id, true);
+        await repo.addRepayment(id, _repayment('r', guest, self, 1000));
+        final data = await repo.load();
+        expect(BalanceService.balances(data.groups.single)[self], 2000);
+        final after = data.personalExpenses(_date);
+        expect(after.meals.single.id, meal.id);
+        expect(after.monthTotal, 30000);
       });
 
       test('T01 建立、編輯成員及群組，拒絕空白與重名', () async {
@@ -298,7 +322,7 @@ void main() {
     test('舊帳本沒有外觀設定或設定值不明時採用光亮模式', () async {
       final id = await repo.createGroup('舊帳本', '生活', []);
       final db = await databaseFactoryFfi.openDatabase(path);
-      expect(await db.getVersion(), 4);
+      expect(await db.getVersion(), ledgerSchemaVersion);
       expect((await repo.load()).appearance, AppAppearance.light);
       await db.insert('app_settings', {'key': 'appearance', 'value': 'other'});
       await repo.close();
@@ -322,7 +346,7 @@ void main() {
         (await db.rawQuery('PRAGMA foreign_keys')).single.values.single,
         1,
       );
-      expect(await db.getVersion(), 4);
+      expect(await db.getVersion(), ledgerSchemaVersion);
       await expectLater(
         db.update(
           'expenses',

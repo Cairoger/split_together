@@ -9,6 +9,7 @@ import 'bank_screen.dart';
 import 'friends_screen.dart';
 import 'expense_screens.dart';
 import 'group_screens.dart';
+import 'personal_expenses_view.dart';
 import 'quick_meal_result_screen.dart';
 import 'quick_meal_screen.dart';
 
@@ -74,7 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          [appName, '群組', '統計', '設定'][tab],
+          [appName, '群組', '我的支出', '統計', '設定'][tab],
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         actions: [
@@ -184,7 +185,8 @@ class _HomeScreenState extends State<HomeScreen> {
             for (final g in visible) _GroupCard(g),
           ],
         ),
-        2 => PageBody(
+        2 => const PersonalExpensesView(),
+        3 => PageBody(
           children: [
             const SectionTitle('各群組消費'),
             if (groups.isEmpty)
@@ -231,6 +233,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.groups_outlined),
             selectedIcon: Icon(Icons.groups),
             label: '群組',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: '我的支出',
           ),
           NavigationDestination(
             icon: Icon(Icons.bar_chart_outlined),

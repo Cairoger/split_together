@@ -21,6 +21,7 @@ abstract interface class SplitRepository {
   Future<void> renameFriend(String id, String name);
   Future<void> archiveFriend(String id);
   Future<void> saveQuickMeal(QuickMeal meal);
+  Future<void> setQuickMealPersonalExpense(String mealId, bool recorded);
   Future<void> setBankApp(BankAppChoice? choice);
   Future<void> setFriendAccount(
     String friendId,

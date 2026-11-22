@@ -2,7 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../domain.dart';
 
-const ledgerSchemaVersion = 4;
+const ledgerSchemaVersion = 5;
 
 // sqflite runs version callbacks inside its opening transaction. Extend the
 // migration sequence here when adding a version, keeping existing records.
@@ -20,6 +20,9 @@ Future<void> migrateLedger(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 4 && newVersion >= 4)
       'ALTER TABLE friends ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0 '
           'CHECK (is_archived IN (0,1))',
+    if (oldVersion < 5 && newVersion >= 5)
+      'ALTER TABLE quick_meals ADD COLUMN recorded_as_personal_expense '
+          'INTEGER NOT NULL DEFAULT 0 CHECK (recorded_as_personal_expense IN (0,1))',
   ]) {
     batch.execute(statement);
   }

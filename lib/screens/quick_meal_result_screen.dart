@@ -37,7 +37,10 @@ class QuickMealResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selfShare = meal.shares[quickMealSelfId] ?? 0;
+    final savedMeal = AppScope.of(context).data.quickMeals
+        .where((saved) => saved.id == meal.id)
+        .firstOrNull;
+    final selfShare = meal.selfShare;
     final selfCollects =
         meal.payerId == quickMealSelfId && meal.total > selfShare;
     return Scaffold(
@@ -67,6 +70,11 @@ class QuickMealResultScreen extends StatelessWidget {
               ),
             ],
           ),
+          if (savedMeal != null && savedMeal.selfShare > 0)
+            _PersonalExpenseAction(
+              key: ValueKey(savedMeal.id),
+              meal: savedMeal,
+            ),
           MealBreakdown(meal: meal),
           const SizedBox(height: 12),
           Text(
@@ -77,6 +85,75 @@ class QuickMealResultScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PersonalExpenseAction extends StatefulWidget {
+  const _PersonalExpenseAction({super.key, required this.meal});
+  final QuickMeal meal;
+
+  @override
+  State<_PersonalExpenseAction> createState() => _PersonalExpenseActionState();
+}
+
+class _PersonalExpenseActionState extends State<_PersonalExpenseAction> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _record(bool recorded) async {
+    if (_busy) return;
+    final controller = AppScope.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    String? error;
+    try {
+      await controller.change(
+        (repo) => repo.setQuickMealPersonalExpense(widget.meal.id, recorded),
+      );
+    } catch (_) {
+      error = recorded ? '無法記入我的支出，請再試一次。' : '無法取消記帳，請再試一次。';
+    }
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _error = error;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (widget.meal.recordedAsPersonalExpense)
+        Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Semantics(liveRegion: true, child: const Text('已記入我的支出')),
+            TextButton(
+              onPressed: _busy ? null : () => _record(false),
+              child: const Text('取消記帳'),
+            ),
+          ],
+        )
+      else
+        OutlinedButton.icon(
+          onPressed: _busy ? null : () => _record(true),
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: Text('記入我的支出 · ${Money.format(widget.meal.selfShare)}'),
+        ),
+      if (_error != null)
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ),
+    ],
+  );
 }
 
 class _PersonalSummary extends StatelessWidget {
@@ -93,7 +170,7 @@ class _PersonalSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final payer = meal.people[meal.payerId]!;
-    final selfShare = meal.shares[quickMealSelfId] ?? 0;
+    final selfShare = meal.selfShare;
     final selfPaid = meal.payerId == quickMealSelfId;
     final owed = selfPaid ? meal.total - selfShare : 0;
     final owes = !selfPaid && selfShare > 0;

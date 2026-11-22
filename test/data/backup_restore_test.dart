@@ -8,12 +8,21 @@ import 'package:split_together/data/account_cipher.dart';
 import 'package:split_together/data/ledger_backup.dart';
 import 'package:split_together/data/memory_repository.dart';
 import 'package:split_together/data/repository.dart';
+import 'package:split_together/data/schema.dart';
 import 'package:split_together/data/sqlite_repository.dart';
 import 'package:split_together/domain.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final _date = DateTime.utc(2026, 9, 3, 8, 15, 0, 3, 17);
 const _testAccount = '00000043216789';
+
+// 由 v1 匯出程式產生，固定舊檔的欄位與原始摘要。
+const _legacyBackup =
+    '{"format":"SplitTogether-Ledger","version":1,"createdAt":"2026-06-01T00:00:00.000Z",'
+    '"data":{"currency":"TWD","friends":[],"groups":[],"quickMeals":[{"id":"old",'
+    '"createdAt":"2026-05-31T13:00:00.000Z","totalMinor":601,"payerId":"@guest:old:1",'
+    '"people":{"@self":"我","@guest:old:1":"小林"},"shares":{"@self":301,"@guest:old:1":300}}]},'
+    '"sha256":"e6d0a465f2f34bdcd8d8ceeefddfd27a356d23d2b6e9b7d1a7882b04e4fc1709"}';
 
 Future<void> _populate(SplitRepository repo) async {
   await repo.setBankApp(const BankAppChoice(id: 'test.source', label: '測試轉帳'));
@@ -206,6 +215,43 @@ void main() {
         expect(await target.isLedgerEmpty(), isFalse);
       });
 
+      test('v1 舊餐預設未記帳，記入後 v2 備份往返保留各餐狀態與原分攤', () async {
+        final legacy = await LedgerBackup.decode(utf8.encode(_legacyBackup));
+        await source.restoreBackup(legacy);
+        final old = (await source.load()).quickMeals.single;
+        expect(old.id, 'old');
+        expect(old.createdAt, DateTime.utc(2026, 5, 31, 13));
+        expect(old.recordedAsPersonalExpense, isFalse);
+        expect(old.selfShare, 301);
+        await source.setQuickMealPersonalExpense(old.id, true);
+        await source.saveQuickMeal(
+          QuickMeal(
+            id: 'new',
+            createdAt: _date,
+            total: 200,
+            payerId: quickMealSelfId,
+            people: {quickMealSelfId: '我', quickMealGuestId('new', 1): '朋友'},
+          ),
+        );
+        final bytes = await (await source.createBackup(_date)).encode();
+        final restored = await LedgerBackup.decode(bytes);
+        await target.restoreBackup(restored);
+        await target.close();
+
+        final meals = (await target.load()).quickMeals;
+        expect(
+          {
+            for (final m in meals)
+              m.id: (m.recordedAsPersonalExpense, m.selfShare),
+          },
+          {'old': (true, 301), 'new': (false, 100)},
+        );
+        final restoredOld = meals.singleWhere((m) => m.id == 'old');
+        old.verifyRetry(restoredOld);
+        expect(restoredOld.shareText, old.shareText);
+        await expectLater(target.restoreBackup(legacy), throwsFormatException);
+      });
+
       for (final kind in ['封存朋友', '空群組', '只有聚餐']) {
         test('確認後出現$kind，再次檢查會停止匯入', () async {
           await source.createFriend('備份朋友');
@@ -269,7 +315,7 @@ void main() {
     });
   }
 
-  test('啟用檔案備份後重開既有第 4 版帳本，可直接匯出並保留本機銀行資料', () async {
+  test('重開目前版本的帳本，可直接匯出並保留本機銀行資料', () async {
     final path = p.join((await _temp()).path, 'split_together.db');
     final key = await AesGcm.with256bits().newSecretKey();
     SqliteSplitRepository openLedger() => SqliteSplitRepository(
@@ -283,7 +329,7 @@ void main() {
     await _populate(original);
     final before = await original.load();
     final existingDb = await databaseFactoryFfi.openDatabase(path);
-    expect(await existingDb.getVersion(), 4);
+    expect(await existingDb.getVersion(), ledgerSchemaVersion);
     await original.close();
 
     final reopened = openLedger();

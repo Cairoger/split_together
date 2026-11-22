@@ -7,21 +7,21 @@ import '../domain.dart';
 
 typedef _Row = Map<String, Object?>;
 
-/// V1 的金額單位為新台幣分。資料欄位刻意獨立於 SQLite 和裝置設定。
+/// 備份的金額單位為新台幣分。資料欄位刻意獨立於 SQLite 和裝置設定。
 final class LedgerBackup {
   LedgerBackup._(this.data, this.createdAt);
 
   factory LedgerBackup.fromData(AppData data, DateTime createdAt) =>
-      LedgerBackup._(_readData(_writeData(data)), createdAt.toUtc());
+      LedgerBackup._(_readData(_writeData(data), _version), createdAt.toUtc());
 
   static const maxBytes = 32 * 1024 * 1024;
   static const _format = 'SplitTogether-Ledger';
-  static const _version = 1;
+  static const _version = 2;
   final AppData data;
   final DateTime createdAt;
 
   Future<Uint8List> encode() async {
-    final content = _content(createdAt, _writeData(data));
+    final content = _content(_version, createdAt, _writeData(data));
     final bytes = utf8.encode(
       jsonEncode({...content, 'sha256': await _checksum(content)}),
     );
@@ -40,22 +40,22 @@ final class LedgerBackup {
       _invalid();
     }
     if (json is! _Row || json['format'] != _format) _invalid();
-    if (json['version'] is! int) _invalid();
-    if (json['version'] != _version) {
+    final version = _integer(json['version']);
+    if (version != 1 && version != _version) {
       throw const FormatException('這個備份格式版本尚未支援。請確認 App 版本。');
     }
     final row = _fields(json, 'format version createdAt data sha256');
     final date = _date(row['createdAt']);
     final data = _fields(row['data'], 'currency groups friends quickMeals');
-    if (row['sha256'] != await _checksum(_content(date, data))) {
+    if (row['sha256'] != await _checksum(_content(version, date, data))) {
       throw const FormatException('備份完整性檢查失敗，請選擇其他備份。');
     }
-    return LedgerBackup._(_readData(data), date);
+    return LedgerBackup._(_readData(data, version), date);
   }
 
-  static _Row _content(DateTime date, _Row data) => {
+  static _Row _content(int version, DateTime date, _Row data) => {
     'format': _format,
-    'version': _version,
+    'version': version,
     'createdAt': _iso(date),
     'data': data,
   };
@@ -137,6 +137,7 @@ _Row _writeData(AppData data) => {
         'payerId': m.payerId,
         'people': m.people,
         'shares': m.shares,
+        'recordedAsPersonalExpense': m.recordedAsPersonalExpense,
       },
   ],
 };
@@ -190,7 +191,7 @@ _Row _writeGroup(Ledger g) => {
   ],
 };
 
-AppData _readData(_Row data) {
+AppData _readData(_Row data, int version) {
   if (data['currency'] != 'TWD') _invalid();
   final friendIds = <String>{};
   final friends = _list(data['friends'], (raw) {
@@ -259,7 +260,11 @@ AppData _readData(_Row data) {
 
   final mealIds = <String>{};
   final meals = _list(data['quickMeals'], (raw) {
-    final row = _fields(raw, 'id createdAt totalMinor payerId people shares');
+    const mealFields = 'id createdAt totalMinor payerId people shares';
+    final row = _fields(
+      raw,
+      version == 1 ? mealFields : '$mealFields recordedAsPersonalExpense',
+    );
     final meal = QuickMeal.recorded(
       id: _unique(row['id'], mealIds),
       createdAt: _date(row['createdAt']),
@@ -267,6 +272,8 @@ AppData _readData(_Row data) {
       payerId: _string(row['payerId']),
       people: _map(row['people'], _string),
       shares: _map(row['shares'], _integer),
+      recordedAsPersonalExpense:
+          version != 1 && _flag(row['recordedAsPersonalExpense']),
     );
     if (!meal.people.keys
         .where(meal.needsSavedFriend)

@@ -177,6 +177,23 @@ class AppData {
   List<SavedFriend> get activeFriends =>
       friends.where((friend) => !friend.isArchived).toList();
 
+  ({List<QuickMeal> meals, int monthTotal}) personalExpenses(DateTime asOf) {
+    final local = asOf.toLocal();
+    final start = DateTime(local.year, local.month);
+    final end = DateTime(local.year, local.month + 1);
+    // 聚餐已依原始日期由新到舊載入，記帳與取消都不改變順序。
+    final meals = quickMeals
+        .where((meal) => meal.recordedAsPersonalExpense)
+        .toList();
+    var monthTotal = 0;
+    for (final meal in meals) {
+      if (!meal.createdAt.isBefore(start) && meal.createdAt.isBefore(end)) {
+        monthTotal += meal.selfShare;
+      }
+    }
+    return (meals: meals, monthTotal: monthTotal);
+  }
+
   Map<String, String> get quickMealPeople {
     final sorted = activeFriends
       ..sort((a, b) {

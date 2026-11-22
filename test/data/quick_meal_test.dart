@@ -273,7 +273,7 @@ void main() {
     expect(await repo.readFriendAccount('old-friend'), number);
     final receipt = meal(upgraded.quickMealPeople, 'old-friend', 60000);
     final db = await databaseFactoryFfi.openDatabase(path);
-    expect(await db.getVersion(), 4);
+    expect(await db.getVersion(), ledgerSchemaVersion);
     await db.execute(
       """CREATE TRIGGER reject_attendee BEFORE INSERT ON quick_meal_people
       WHEN NEW.person_id = 'old-friend' BEGIN SELECT RAISE(ABORT, '測試資料寫入失敗'); END""",
